@@ -1,0 +1,1545 @@
+<!DOCTYPE html>
+<html lang="es-AR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#1565c0">
+<!-- Que se abra como app al "Agregar a pantalla de inicio" -->
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Cédulas">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='40' fill='%231565c0'/%3E%3Ctext x='90' y='128' font-size='110' text-anchor='middle'%3E%F0%9F%93%8D%3C/text%3E%3C/svg%3E">
+<link rel="manifest" href="manifest.json">
+<title>Reparto de Cédulas – Recorrido</title>
+
+<!-- Leaflet (mapa) -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- Generador de código QR (para compartir el recorrido) -->
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+
+<style>
+  :root{
+    --azul:#1565c0;
+    --azul-osc:#0d47a1;
+    --verde:#2e7d32;
+    --naranja:#ef6c00;
+    --rojo:#c62828;
+    --gris:#eceff1;
+    --texto:#222;
+    --sombra:0 2px 10px rgba(0,0,0,.25);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;height:100%;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:var(--texto);}
+  #map{position:absolute;inset:0;z-index:0;}
+
+  /* ---------- Barra superior ---------- */
+  header{
+    position:absolute;top:0;left:0;right:0;z-index:1000;
+    background:var(--azul);color:#fff;padding:8px 10px;box-shadow:var(--sombra);
+  }
+  header h1{margin:0 0 6px;font-size:16px;font-weight:600;display:flex;align-items:center;gap:6px;}
+  .buscador{display:flex;gap:6px;}
+  .buscador input{flex:1;border:0;border-radius:8px;padding:12px;font-size:16px;outline:none;}
+  .buscador button{border:0;border-radius:8px;background:var(--azul-osc);color:#fff;font-size:16px;padding:0 16px;font-weight:600;}
+  #resultados{
+    background:#fff;color:#222;border-radius:8px;margin-top:6px;overflow:hidden;
+    box-shadow:var(--sombra);display:none;max-height:45vh;overflow-y:auto;
+  }
+  #resultados .res{padding:12px;border-bottom:1px solid #eee;font-size:15px;cursor:pointer;display:flex;align-items:center;gap:8px;}
+  #resultados .res:active{background:#e3f2fd;}
+  #resultados .res .ico{font-size:18px;}
+  #resultados .vacio{padding:12px;color:#777;font-size:14px;}
+
+  /* ---------- Botones flotantes ---------- */
+  .fab-col{position:absolute;right:12px;bottom:96px;z-index:1000;display:flex;flex-direction:column;gap:10px;}
+  .fab{
+    width:52px;height:52px;border-radius:50%;border:0;background:#fff;color:var(--azul);
+    font-size:24px;box-shadow:var(--sombra);display:flex;align-items:center;justify-content:center;
+  }
+  .fab.activo{background:var(--azul);color:#fff;}
+
+  /* ---------- Panel de paradas (hoja inferior) ---------- */
+  #panel{
+    position:absolute;left:0;right:0;bottom:0;z-index:1100;
+    background:#fff;border-radius:16px 16px 0 0;box-shadow:0 -2px 14px rgba(0,0,0,.25);
+    transform:translateY(calc(100% - 60px));transition:transform .25s ease;max-height:74vh;display:flex;flex-direction:column;
+  }
+  #panel.abierto{transform:translateY(0);}
+  .panel-head{padding:12px 14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none;position:relative;}
+  .panel-head .titulo{font-weight:700;font-size:16px;display:flex;align-items:center;gap:8px;}
+  .panel-head .agarre{position:absolute;left:50%;top:6px;transform:translateX(-50%);width:40px;height:4px;border-radius:2px;background:#ccc;}
+  .badge{background:var(--azul);color:#fff;border-radius:12px;padding:2px 9px;font-size:13px;}
+  .panel-acciones{display:flex;gap:6px;}
+  .mini{border:0;background:var(--gris);border-radius:8px;padding:9px 10px;font-size:13px;font-weight:600;color:#333;}
+  .mini.pri{background:var(--azul);color:#fff;}
+
+  #lista{overflow-y:auto;padding:4px 8px 18px;}
+  .item{display:flex;align-items:center;gap:10px;padding:10px 6px;border-bottom:1px solid #f0f0f0;}
+  .num{min-width:30px;height:30px;border-radius:50%;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex:0 0 auto;}
+  .dir{flex:1;font-size:15px;line-height:1.25;word-break:break-word;}
+  .dir small{display:block;color:#888;font-size:12px;margin-top:2px;}
+  .dir .tags{display:flex;gap:6px;margin-top:3px;flex-wrap:wrap;}
+  .tag{font-size:11px;background:#eef2f7;color:#555;border-radius:10px;padding:1px 7px;}
+  .item.notificada .dir b{text-decoration:line-through;color:#9e9e9e;}
+  .item-btns{display:flex;gap:6px;flex:0 0 auto;}
+  .ib{border:0;border-radius:8px;width:42px;height:42px;font-size:18px;background:var(--gris);}
+  .ib.go{background:#e3f2fd;}
+  .ib.ver{background:#ede7f6;}
+  .vacio-lista{padding:24px 14px;color:#777;text-align:center;font-size:15px;}
+
+  /* ---------- Marcadores numerados ---------- */
+  .pin{width:30px;height:30px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;}
+  .pin span{transform:rotate(45deg);color:#fff;font-weight:700;font-size:13px;}
+
+  /* ---------- Aviso modo "tocar mapa" ---------- */
+  #aviso{position:absolute;top:120px;left:50%;transform:translateX(-50%);z-index:1000;background:var(--azul-osc);color:#fff;padding:8px 14px;border-radius:20px;font-size:14px;box-shadow:var(--sombra);display:none;}
+  .toast{position:fixed;bottom:170px;left:50%;transform:translateX(-50%);z-index:9999;background:#323232;color:#fff;padding:10px 16px;border-radius:24px;font-size:14px;box-shadow:var(--sombra);opacity:0;transition:opacity .2s;pointer-events:none;max-width:90%;text-align:center;}
+  .toast.show{opacity:1;}
+
+  /* ---------- Pantalla de bienvenida ---------- */
+  #bienvenida{position:fixed;inset:0;z-index:5000;background:rgba(13,71,161,.97);color:#fff;display:none;flex-direction:column;overflow-y:auto;padding:22px 20px 30px;}
+  #bienvenida.ver{display:flex;}
+  #bienvenida .marca{font-size:30px;text-align:center;margin:6px 0 2px;}
+  #bienvenida h2{font-size:22px;text-align:center;margin:0 0 4px;font-weight:700;}
+  #bienvenida .sub{text-align:center;opacity:.9;font-size:15px;margin-bottom:18px;}
+  .paso{background:rgba(255,255,255,.12);border-radius:14px;padding:14px 14px 14px 56px;position:relative;margin-bottom:12px;}
+  .paso .n{position:absolute;left:12px;top:14px;width:32px;height:32px;border-radius:50%;background:#fff;color:var(--azul-osc);font-weight:800;font-size:16px;display:flex;align-items:center;justify-content:center;}
+  .paso b{font-size:16px;display:block;margin-bottom:3px;}
+  .paso span{font-size:14.5px;line-height:1.45;opacity:.95;}
+  .paso .ej{display:inline-block;background:rgba(255,255,255,.22);border-radius:6px;padding:1px 6px;font-weight:600;}
+  #btnEmpezar{margin-top:8px;border:0;border-radius:30px;background:#fff;color:var(--azul-osc);font-size:19px;font-weight:800;padding:16px;box-shadow:var(--sombra);}
+  #bienvenida .pie{text-align:center;font-size:13px;opacity:.85;margin-top:14px;}
+
+  /* ---------- Detalle del domicilio ---------- */
+  #detalle{position:fixed;inset:0;z-index:5500;background:#f4f6f8;display:none;flex-direction:column;}
+  #detalle.ver{display:flex;}
+  .det-head{background:var(--azul);color:#fff;padding:12px 12px;display:flex;align-items:center;gap:10px;box-shadow:var(--sombra);}
+  .det-head .volver{font-size:24px;background:transparent;border:0;color:#fff;padding:0 4px;}
+  .det-head .t{font-size:17px;font-weight:700;flex:1;}
+  .det-body{flex:1;overflow-y:auto;padding:14px;}
+  .tarjeta{background:#fff;border-radius:14px;padding:14px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.08);}
+  .tarjeta h3{margin:0 0 10px;font-size:14px;color:#666;font-weight:700;text-transform:uppercase;letter-spacing:.5px;}
+  .det-dir{font-size:18px;font-weight:600;line-height:1.3;}
+  .det-editar{margin-top:8px;background:var(--gris);border:0;border-radius:8px;padding:8px 12px;font-size:13px;font-weight:600;color:#333;}
+  .estados{display:flex;gap:8px;}
+  .estado-btn{flex:1;border:2px solid #ddd;background:#fff;border-radius:12px;padding:12px 4px;font-size:13px;font-weight:700;color:#555;display:flex;flex-direction:column;align-items:center;gap:4px;}
+  .estado-btn .e{font-size:22px;}
+  .estado-btn.sel{color:#fff;border-color:transparent;}
+  textarea#nota{width:100%;border:1px solid #d8dde2;border-radius:10px;padding:12px;font-size:16px;font-family:inherit;min-height:90px;resize:vertical;outline:none;}
+  .fotos-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px;}
+  .foto-th{position:relative;padding-top:100%;border-radius:10px;overflow:hidden;background:#e9eef3;}
+  .foto-th img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
+  .btn-foto{width:100%;border:2px dashed #b0bec5;background:#f0f4f8;border-radius:12px;padding:16px;font-size:16px;font-weight:700;color:var(--azul);}
+  .det-acciones{display:flex;gap:8px;margin-top:2px;}
+  .det-acciones button{flex:1;border:0;border-radius:12px;padding:14px 6px;font-size:14px;font-weight:700;color:#fff;}
+  .ba-llegar{background:var(--azul);}
+  .ba-mapa{background:#6a1b9a;}
+  .ba-borrar{background:var(--rojo);}
+
+  /* ---------- Visor de foto a pantalla completa ---------- */
+  #lightbox{position:fixed;inset:0;z-index:6000;background:rgba(0,0,0,.92);display:none;flex-direction:column;align-items:center;justify-content:center;padding:16px;}
+  #lightbox.ver{display:flex;}
+  #lightbox img{max-width:100%;max-height:80%;border-radius:8px;}
+  #lightbox .lb-btns{display:flex;gap:12px;margin-top:18px;}
+  #lightbox .lb-btns button{border:0;border-radius:24px;padding:12px 22px;font-size:15px;font-weight:700;}
+  #lightbox .cerrar{background:#fff;color:#222;}
+  #lightbox .borrar{background:var(--rojo);color:#fff;}
+
+  /* ---------- Filtros del recorrido ---------- */
+  #filtros{display:flex;gap:6px;padding:2px 10px 8px;overflow-x:auto;}
+  .chip{border:0;background:var(--gris);border-radius:16px;padding:7px 12px;font-size:13px;font-weight:600;color:#444;white-space:nowrap;}
+  .chip.sel{background:var(--azul);color:#fff;}
+  .chip .c{opacity:.75;font-weight:700;}
+  /* ---------- Campos de la ficha ---------- */
+  .campo{margin-bottom:10px;}
+  .campo:last-child{margin-bottom:0;}
+  .campo label{display:block;font-size:12px;color:#888;font-weight:700;margin-bottom:3px;text-transform:uppercase;letter-spacing:.4px;}
+  .campo input{width:100%;border:1px solid #d8dde2;border-radius:10px;padding:11px;font-size:16px;font-family:inherit;outline:none;}
+  /* ---------- Historial de visitas ---------- */
+  .historial{list-style:none;margin:0;padding:0;}
+  .historial li{display:flex;align-items:center;gap:8px;font-size:14px;padding:7px 0;border-bottom:1px solid #f0f0f0;}
+  .historial li:last-child{border-bottom:0;}
+  .historial .pe{font-size:16px;}
+  .historial .fe{color:#888;margin-left:auto;font-size:12px;white-space:nowrap;}
+
+  /* ---------- Menú (hoja de acciones) ---------- */
+  #menu, .hoja-modal{position:fixed;inset:0;z-index:5800;background:rgba(0,0,0,.4);display:none;align-items:flex-end;}
+  #menu.ver, .hoja-modal.ver{display:flex;}
+  #menu .hoja, .hoja-modal .hoja{background:#fff;width:100%;border-radius:16px 16px 0 0;padding:8px;box-shadow:0 -2px 14px rgba(0,0,0,.3);max-height:88vh;overflow-y:auto;}
+  .hb{width:100%;text-align:left;border:0;background:#fff;border-radius:12px;padding:14px;font-size:16px;font-weight:700;color:#222;display:flex;flex-direction:column;gap:2px;}
+  .hb span{font-size:12.5px;font-weight:400;color:#888;}
+  .hb:active{background:#f0f4f8;}
+  .hb.peligro{color:var(--rojo);}
+  .hb.cancelar{text-align:center;color:#666;font-weight:600;margin-top:4px;border-top:1px solid #eee;border-radius:0;}
+  /* ---------- Compartir / QR ---------- */
+  #compartir{position:fixed;inset:0;z-index:5600;background:#f4f6f8;display:none;flex-direction:column;}
+  #compartir.ver{display:flex;}
+  #compartir .det-dir{text-align:center;font-size:15px;font-weight:400;color:#444;}
+  #qrBox{display:flex;justify-content:center;margin-top:12px;min-height:120px;align-items:center;}
+  #qrBox img{width:240px;height:240px;image-rendering:pixelated;}
+
+  /* ---------- Navegación paso a paso ---------- */
+  #nav{position:fixed;inset:0;z-index:1500;pointer-events:none;display:none;flex-direction:column;justify-content:space-between;}
+  body.navegando #nav{display:flex;}
+  body.navegando header, body.navegando .fab-col, body.navegando #panel{display:none!important;}
+  .nav-top{pointer-events:auto;background:var(--azul-osc);color:#fff;padding:16px;box-shadow:var(--sombra);}
+  .nav-instr{font-size:21px;font-weight:700;line-height:1.25;}
+  .nav-dist{font-size:15px;opacity:.92;margin-top:5px;}
+  .nav-bottom{pointer-events:auto;background:#fff;border-radius:16px 16px 0 0;padding:12px 14px 14px;box-shadow:0 -2px 14px rgba(0,0,0,.2);}
+  .nav-dest{font-weight:700;font-size:16px;line-height:1.25;}
+  .nav-meta{color:#666;font-size:14px;margin:3px 0 10px;}
+  .nav-btns{display:flex;gap:8px;}
+  .nav-btns button{flex:1;border:0;border-radius:10px;padding:13px 4px;font-size:13px;font-weight:700;background:var(--gris);color:#333;}
+  .nav-btns #navVoz{flex:0 0 52px;}
+  .nav-btns #navVoz.mute{background:#eee;color:#999;}
+  .nav-btns #navGmaps{background:#e3f2fd;color:var(--azul);}
+  .nav-btns #navSalir{background:#ffebee;color:var(--rojo);}
+
+  /* ---------- Selector de recorrido + punto de salida ---------- */
+  .panel-head .titulo{cursor:pointer;min-width:0;}
+  .panel-head .titulo .flecha{font-size:12px;opacity:.6;}
+  #nombreRec{display:inline-block;max-width:38vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom;}
+  #barraSalida{display:flex;align-items:center;gap:8px;padding:8px 12px;margin:0 8px 6px;background:#f0f4f8;border-radius:10px;font-size:13.5px;cursor:pointer;}
+  #barraSalida .bs-t{flex:1;color:#333;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  #barraSalida .bs-t b{color:#000;}
+  #barraSalida .bs-c{color:var(--azul);font-weight:700;font-size:12px;white-space:nowrap;}
+  /* Lista de recorridos guardados */
+  .rec-item{display:flex;align-items:center;gap:10px;padding:13px 12px;border-radius:10px;border:0;background:#fff;width:100%;text-align:left;font-size:15px;}
+  .rec-item.sel{background:#e3f2fd;}
+  .rec-item .ri-t{flex:1;font-weight:700;color:#222;}
+  .rec-item .ri-t small{display:block;font-weight:400;color:#888;font-size:12px;margin-top:2px;}
+  .rec-item .ri-x{border:0;background:transparent;font-size:16px;padding:6px;color:#999;}
+  #recLista{max-height:46vh;overflow-y:auto;}
+  /* Marcador del punto de salida */
+  .pin-salida{width:30px;height:30px;border-radius:50%;background:#fff;border:3px solid var(--azul);box-shadow:0 1px 4px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font-size:15px;}
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<header>
+  <h1>📍 Reparto de Cédulas</h1>
+  <div class="buscador">
+    <input id="q" type="text" placeholder="Calle y número (ej: Montevideo 1234)" autocomplete="off" enterkeyhint="search">
+    <button id="btnBuscar">Buscar</button>
+  </div>
+  <div id="resultados"></div>
+</header>
+
+<div id="aviso">Tocá en el mapa dónde está el domicilio 👆</div>
+
+<div class="fab-col">
+  <button class="fab" id="btnAyuda" title="Ayuda">❔</button>
+  <button class="fab" id="btnTocar" title="Agregar tocando el mapa">➕📌</button>
+  <button class="fab" id="btnUbic" title="Mi ubicación">🎯</button>
+</div>
+
+<!-- Panel inferior: recorrido -->
+<div id="panel">
+  <div class="panel-head" id="panelHead">
+    <span class="agarre"></span>
+    <span class="titulo" id="tituloRec">🗂️ <span id="nombreRec">Recorrido</span> <span class="flecha">▼</span> <span class="badge" id="contador">0</span></span>
+    <div class="panel-acciones">
+      <button class="mini pri" id="btnProxima">🧭 Ir</button>
+      <button class="mini" id="btnOrdenar">📐 Ordenar</button>
+      <button class="mini" id="btnMenu">⋯</button>
+    </div>
+  </div>
+  <div id="barraSalida">
+    <span>🚩</span>
+    <span class="bs-t" id="salidaTxt">Salida: <b>Mi ubicación (GPS)</b></span>
+    <span class="bs-c">Cambiar</span>
+  </div>
+  <div id="filtros"></div>
+  <div id="lista"></div>
+</div>
+
+<!-- Hoja: mis recorridos guardados -->
+<div id="hojaRec" class="hoja-modal">
+  <div class="hoja">
+    <div style="padding:6px 12px 10px;font-weight:800;font-size:16px">📁 Mis recorridos</div>
+    <div id="recLista"></div>
+    <button class="hb" id="recNuevo" style="border-top:1px solid #eee;margin-top:6px">➕ Nuevo recorrido <span>Empezar una lista nueva y vacía</span></button>
+    <button class="hb" id="recRenombrar">✏️ Renombrar el actual</button>
+    <button class="hb cancelar" id="recCancelar">Cancelar</button>
+  </div>
+</div>
+
+<!-- Hoja: elegir punto de salida -->
+<div id="hojaSalida" class="hoja-modal">
+  <div class="hoja">
+    <div style="padding:6px 12px 10px;font-weight:800;font-size:16px">🚩 ¿Desde dónde sale el recorrido?</div>
+    <button class="hb" id="salGps">🎯 Mi ubicación (GPS) <span>Usa dónde está parada en el momento</span></button>
+    <button class="hb" id="salBuscar">🔎 Buscar una dirección <span>Ej: la oficina, el juzgado, su casa</span></button>
+    <button class="hb" id="salMapa">📌 Marcar en el mapa <span>Tocar el punto exacto con el dedo</span></button>
+    <button class="hb" id="salPrimera">1️⃣ La primera parada de la lista</button>
+    <button class="hb cancelar" id="salCancelar">Cancelar</button>
+  </div>
+</div>
+
+<!-- Pantalla de bienvenida -->
+<div id="bienvenida">
+  <div class="marca">📍</div>
+  <h2>¡Hola Mamá! 👋</h2>
+  <div class="sub">Tu app para repartir cédulas y seguir el recorrido. Te explico:</div>
+
+  <div class="paso"><div class="n">1</div>
+    <b>Agregá un domicilio</b>
+    <span>Escribí la calle y número arriba (ej: <span class="ej">Montevideo 1234</span>) y tocá <b>Buscar</b>. ¿No aparece? Tocá <span class="ej">➕📌</span> y marcalo con el dedo en el mapa.</span>
+  </div>
+
+  <div class="paso"><div class="n">2</div>
+    <b>Mirá dónde estás</b>
+    <span>Apenas toques el botón de abajo, el celu te va a preguntar si permitís la ubicación → tocá <span class="ej">Permitir</span>. Aparece un puntito azul que sos vos. Para recentrar, tocá <span class="ej">🎯</span>.</span>
+  </div>
+
+  <div class="paso"><div class="n">3</div>
+    <b>Tocá un domicilio para abrir su ficha</b>
+    <span>Ahí podés sacarle <span class="ej">📷 fotos</span> (la reja, la puerta), escribir <span class="ej">📝 notas</span> ("no estaba, volver a la tarde") y marcar el resultado: <b>Notificada</b> o <b>No estaba</b>.</span>
+  </div>
+
+  <div class="paso"><div class="n">4</div>
+    <b>Armá el recorrido</b>
+    <span>Tocá <span class="ej">📐 Ordenar</span> y las paradas se acomodan de la más cercana a la más lejana desde donde estás. Se dibuja la línea del camino en el mapa.</span>
+  </div>
+
+  <div class="paso"><div class="n">5</div>
+    <b>Andá a la próxima</b>
+    <span>Tocá <span class="ej">🧭 Ir</span> (o el 🧭 de cada parada) y se abre el mapa de Google con las indicaciones caminando hasta ahí.</span>
+  </div>
+
+  <button id="btnEmpezar">¡Listo, empezar! ✅</button>
+  <div class="pie">Todo (fotos y notas incluidas) se guarda en este teléfono.<br>Para volver a ver esta ayuda, tocá el botón <b>❔</b>.</div>
+</div>
+
+<!-- Ficha de detalle del domicilio -->
+<div id="detalle">
+  <div class="det-head">
+    <button class="volver" id="detVolver">←</button>
+    <span class="t">Ficha del domicilio</span>
+  </div>
+  <div class="det-body" id="detBody"><!-- se llena por JS --></div>
+</div>
+
+<!-- Visor de foto -->
+<div id="lightbox">
+  <img id="lbImg" src="" alt="foto">
+  <div class="lb-btns">
+    <button class="borrar" id="lbBorrar">🗑️ Borrar foto</button>
+    <button class="cerrar" id="lbCerrar">Cerrar</button>
+  </div>
+</div>
+
+<!-- Menú de acciones -->
+<div id="menu">
+  <div class="hoja">
+    <button class="hb" id="mCompartir">📤 Compartir recorrido <span>Pasarlo a otro celular (QR o link)</span></button>
+    <button class="hb" id="mInforme">📄 Informe del día <span>Para imprimir o guardar PDF</span></button>
+    <button class="hb" id="mCopiar">📋 Copiar respaldo <span>Texto con las direcciones (sin fotos)</span></button>
+    <button class="hb" id="mPegar">📥 Pegar respaldo <span>Restaurar desde un texto copiado</span></button>
+    <button class="hb peligro" id="mBorrar">🗑️ Borrar todos los domicilios</button>
+    <button class="hb cancelar" id="mCancelar">Cancelar</button>
+  </div>
+</div>
+
+<!-- Compartir recorrido (QR + link) -->
+<div id="compartir">
+  <div class="det-head">
+    <button class="volver" id="compVolver">←</button>
+    <span class="t">📤 Compartir recorrido</span>
+  </div>
+  <div class="det-body">
+    <div class="tarjeta" style="text-align:center">
+      <h3>Escaneá con el celular</h3>
+      <div class="det-dir">Abrí la <b>cámara del celular</b> y apuntá a este código. Se va a abrir el mismo recorrido ahí.</div>
+      <div id="qrBox"></div>
+    </div>
+    <div class="tarjeta">
+      <h3>O mandátelo por mensaje</h3>
+      <input id="compLink" readonly onclick="this.select()" style="width:100%;border:1px solid #d8dde2;border-radius:10px;padding:11px;font-size:13px;font-family:inherit;outline:none;margin-bottom:10px;color:#333;background:#f7f9fb;">
+      <div class="det-acciones">
+        <button class="ba-llegar" id="compCopiar">📋 Copiar link</button>
+        <button class="ba-mapa" id="compWA">📲 Compartir</button>
+      </div>
+      <div class="det-sub" style="margin-top:12px">Por el link viajan las direcciones, el orden, las notas y el estado. Las <b>fotos no se comparten</b>: quedan guardadas en cada teléfono.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Navegación paso a paso -->
+<div id="nav">
+  <div class="nav-top">
+    <div class="nav-instr" id="navInstr">Calculando ruta…</div>
+    <div class="nav-dist" id="navDist"></div>
+  </div>
+  <div class="nav-bottom">
+    <div class="nav-dest" id="navDest"></div>
+    <div class="nav-meta" id="navMeta"></div>
+    <button id="navSiguiente" style="display:none;width:100%;border:0;border-radius:10px;padding:12px;font-size:15px;font-weight:700;background:var(--verde);color:#fff;margin-bottom:8px">Siguiente parada ▶</button>
+    <div class="nav-btns">
+      <button id="navModoBtn">🚶 A pie</button>
+      <button id="navVoz">🔊</button>
+      <button id="navGmaps">🗺️ Google</button>
+      <button id="navSalir">✕ Salir</button>
+    </div>
+  </div>
+</div>
+
+<!-- input oculto para sacar/elegir fotos -->
+<input type="file" id="inputFoto" accept="image/*" multiple style="display:none">
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================
+   App para notificadores judiciales (reparto de cédulas).
+   - Domicilios con fotos y notas, guardado en el propio teléfono.
+   - Fotos en IndexedDB; el resto (direcciones/notas/estado) en localStorage.
+   ============================================================ */
+
+const BERISSO = [-34.8709, -57.8859];
+const ALMACEN = 'paradas_berisso_v1';   // formato viejo (se migra solo)
+const ALMACEN2 = 'recorridos_v2';       // { activo:id, lista:[{id,nombre,origen,stops}] }
+
+const ESTADOS = {
+  pendiente:  {etiqueta:'Pendiente',  color:'#ef6c00', e:'🟠'},
+  notificada: {etiqueta:'Notificada', color:'#2e7d32', e:'✅'},
+  ausente:    {etiqueta:'No estaba',  color:'#c62828', e:'🔴'},
+};
+
+let almacen = cargarAlmacen();          // { activo, lista:[recorridos] }
+let stops = recActivo().stops;          // paradas del recorrido activo
+let map, capaUbic = null, marcadores = {}, lineaRuta = null, modoTocar = false;
+let detalleActual = null;       // id del domicilio abierto en la ficha
+let lbFotoId = null;            // id de la foto abierta en el visor
+let filtro = 'todos';           // filtro activo de la lista
+let marcadorSalida = null;      // pin del punto de salida
+let eligiendoSalida = false;    // esperando que toque el mapa para fijar la salida
+let buscandoSalida = false;     // el buscador va a fijar la salida (no agregar parada)
+let rutaCalles = null, rutaCallesBorde = null, claveRuta = '', resumenRuta = '';   // línea real por las calles
+
+/* ---------- Mapa ---------- */
+map = L.map('map', {zoomControl:false}).setView(BERISSO, 14);
+L.control.zoom({position:'bottomleft'}).addTo(map);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19, attribution:'© OpenStreetMap'}).addTo(map);
+
+/* ---------- Persistencia: varios recorridos guardados ---------- */
+function normalizarStops(arr){
+  return (arr||[]).map(s=>({
+    id:s.id || idNuevo(), dir:s.dir, lat:+s.lat, lng:+s.lng,
+    estado: s.estado || (s.hecha ? 'notificada' : 'pendiente'),
+    nota: s.nota || '',
+    destinatario: s.destinatario || '',
+    expediente: s.expediente || '',
+    intentos: Array.isArray(s.intentos) ? s.intentos : []
+  })).filter(s=> isFinite(s.lat) && isFinite(s.lng));
+}
+function recorridoNuevo(nombre, stops){
+  return {id: idNuevo(), nombre: nombre || 'Recorrido', origen: null, stops: stops || []};
+}
+function cargarAlmacen(){
+  // Formato nuevo
+  try{
+    const a = JSON.parse(localStorage.getItem(ALMACEN2));
+    if(a && Array.isArray(a.lista) && a.lista.length){
+      a.lista.forEach(r=>{ r.stops = normalizarStops(r.stops); if(!r.nombre) r.nombre='Recorrido'; if(!r.id) r.id=idNuevo(); });
+      if(!a.lista.some(r=>r.id===a.activo)) a.activo = a.lista[0].id;
+      return a;
+    }
+  }catch(e){}
+  // Migrar del formato viejo (una sola lista)
+  let viejos = [];
+  try{ viejos = normalizarStops(JSON.parse(localStorage.getItem(ALMACEN)) || []); }catch(e){}
+  const r = recorridoNuevo('Mi recorrido', viejos);
+  return {activo: r.id, lista: [r]};
+}
+function recActivo(){
+  let r = almacen.lista.find(x=>x.id===almacen.activo);
+  if(!r){ r = almacen.lista[0] || recorridoNuevo('Mi recorrido', []); almacen.lista=[r]; almacen.activo=r.id; }
+  return r;
+}
+function guardar(){
+  recActivo().stops = stops;                       // stops puede haber sido reasignado
+  localStorage.setItem(ALMACEN2, JSON.stringify(almacen));
+}
+
+/* ---------- IndexedDB para las fotos ---------- */
+let db = null;
+function abrirDB(){
+  return new Promise((res)=>{
+    try{
+      const req = indexedDB.open('mapaBerisso', 1);
+      req.onupgradeneeded = e=>{
+        const d = e.target.result;
+        if(!d.objectStoreNames.contains('fotos')){
+          const st = d.createObjectStore('fotos', {keyPath:'id', autoIncrement:true});
+          st.createIndex('porStop','stopId',{unique:false});
+        }
+      };
+      req.onsuccess = e=>{ db = e.target.result; res(true); };
+      req.onerror = ()=>{ db = null; res(false); };
+    }catch(e){ db = null; res(false); }
+  });
+}
+function storeFotos(modo){ return db.transaction('fotos', modo).objectStore('fotos'); }
+function addFoto(stopId, dataURL){
+  return new Promise((res,rej)=>{
+    const r = storeFotos('readwrite').add({stopId, dataURL, fecha: Date.now()});
+    r.onsuccess = ()=>res(r.result); r.onerror = ()=>rej(r.error);
+  });
+}
+function getFotos(stopId){
+  return new Promise((res)=>{
+    if(!db) return res([]);
+    const out=[]; const idx = storeFotos('readonly').index('porStop');
+    const r = idx.openCursor(IDBKeyRange.only(stopId));
+    r.onsuccess = e=>{ const c=e.target.result; if(c){ out.push(c.value); c.continue(); } else res(out); };
+    r.onerror = ()=>res(out);
+  });
+}
+function contarFotos(stopId){ return getFotos(stopId).then(f=>f.length); }
+function delFoto(id){ return new Promise((res)=>{ const r=storeFotos('readwrite').delete(id); r.onsuccess=()=>res(); r.onerror=()=>res(); }); }
+function delFotosDeStop(stopId){ return getFotos(stopId).then(fs=>Promise.all(fs.map(f=>delFoto(f.id)))); }
+
+/* ---------- Utilidades ---------- */
+function toast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._t); t._t = setTimeout(()=>t.classList.remove('show'), 2800);
+}
+function idNuevo(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+function escapar(t){ return (t||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function esPendiente(s){ return s.estado !== 'notificada'; }   // ausente también va en la ruta (hay que volver)
+function fechaCorta(ts){ try{ const d=new Date(ts); return d.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit'})+' '+d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}); }catch(e){ return ''; } }
+function coincideFiltro(s){ return filtro==='todos' ? true : s.estado===filtro; }
+
+/* ---------- Dibujar mapa + lista ---------- */
+function pinIcono(numero, estado){
+  const col = ESTADOS[estado].color;
+  return L.divIcon({className:'', html:`<div class="pin" style="background:${col}"><span>${numero}</span></div>`,
+    iconSize:[30,30], iconAnchor:[15,30], popupAnchor:[0,-30]});
+}
+
+function redibujar(){
+  for(const id in marcadores){ map.removeLayer(marcadores[id]); }
+  marcadores = {};
+  if(lineaRuta){ map.removeLayer(lineaRuta); lineaRuta = null; }
+
+  stops.forEach((s, i)=>{
+    const m = L.marker([s.lat, s.lng], {icon: pinIcono(i+1, s.estado)}).addTo(map);
+    m.on('click', ()=> abrirDetalle(s.id));
+    marcadores[s.id] = m;
+  });
+
+  // Pin del punto de salida (si eligió uno fijo)
+  if(marcadorSalida){ map.removeLayer(marcadorSalida); marcadorSalida = null; }
+  const org = recActivo().origen;
+  if(org){
+    marcadorSalida = L.marker([org.lat, org.lng], {
+      icon: L.divIcon({className:'', html:'<div class="pin-salida">🚩</div>', iconSize:[30,30], iconAnchor:[15,15]}),
+      zIndexOffset: -100
+    }).addTo(map);
+    marcadorSalida.bindPopup('<b>🚩 Salida</b><br>'+escapar(org.dir||'Punto marcado'));
+  }
+
+  // Línea del recorrido: primero la recta provisoria, después la real por las calles
+  const puntos = puntosRecorrido();
+  if(puntos.length >= 2){
+    lineaRuta = L.polyline(puntos.map(p=>[p.lat,p.lng]), {color:'#1565c0', weight:3, opacity:.35, dashArray:'6,8'}).addTo(map);
+    dibujarRutaPorCalles(puntos);
+  }else{
+    if(rutaCalles){ map.removeLayer(rutaCalles); rutaCalles = null; }
+    if(rutaCallesBorde){ map.removeLayer(rutaCallesBorde); rutaCallesBorde = null; }
+    claveRuta = ''; resumenRuta = '';
+  }
+  actualizarBarraSalida();
+
+  // Contador de pendientes
+  document.getElementById('contador').textContent = stops.filter(esPendiente).length;
+
+  // Chips de filtro con sus conteos
+  const conteo = {todos:stops.length, pendiente:0, notificada:0, ausente:0};
+  stops.forEach(s=> { if(conteo[s.estado]!==undefined) conteo[s.estado]++; });
+  const chips = [['todos','Todos'],['pendiente','🟠 Pendientes'],['notificada','✅ Notificadas'],['ausente','🔴 No estaba']];
+  document.getElementById('filtros').innerHTML = chips.map(([k,t])=>
+    `<button class="chip ${filtro===k?'sel':''}" onclick="setFiltro('${k}')">${t} <span class="c">${conteo[k]}</span></button>`
+  ).join('');
+
+  // Lista (respetando el filtro)
+  const cont = document.getElementById('lista');
+  if(stops.length === 0){
+    cont.innerHTML = `<div class="vacio-lista">Todavía no agregaste domicilios.<br><br>
+      Buscá una dirección arriba, o tocá <b>➕📌</b> y marcala en el mapa.</div>`;
+    return;
+  }
+  const visibles = stops.map((s,i)=>({s,i})).filter(x=> coincideFiltro(x.s));
+  if(visibles.length === 0){
+    cont.innerHTML = `<div class="vacio-lista">No hay domicilios en este filtro.</div>`;
+    return;
+  }
+  cont.innerHTML = visibles.map(({s,i})=>{
+    const est = ESTADOS[s.estado];
+    const sub = [s.destinatario, s.expediente?('Exp. '+s.expediente):''].filter(Boolean).join(' · ');
+    const ult = (s.intentos && s.intentos.length) ? s.intentos[s.intentos.length-1] : null;
+    return `<div class="item ${s.estado}">
+      <div class="num" style="background:${est.color}">${i+1}</div>
+      <div class="dir" onclick="abrirDetalle('${s.id}')">
+        <b>${escapar(s.dir)}</b>
+        ${sub?`<small>${escapar(sub)}</small>`:''}
+        <div class="tags">
+          <span class="tag" style="color:${est.color};font-weight:700">${est.e} ${est.etiqueta}</span>
+          ${ult?`<span class="tag">🕘 ${fechaCorta(ult.fecha)}</span>`:''}
+          ${s.nota?`<span class="tag">📝 nota</span>`:''}
+          <span class="tag" data-fotos="${s.id}"></span>
+        </div>
+      </div>
+      <div class="item-btns">
+        <button class="ib go"  title="Navegar" onclick="event.stopPropagation();navegarA('${s.id}')">🧭</button>
+        <button class="ib ver" title="Abrir ficha" onclick="event.stopPropagation();abrirDetalle('${s.id}')">›</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  // Mostrar cantidad de fotos en cada tag (async)
+  visibles.forEach(({s})=> contarFotos(s.id).then(n=>{
+    const el = document.querySelector(`.tag[data-fotos="${s.id}"]`);
+    if(el){ if(n>0){ el.textContent = `📷 ${n}`; } else { el.remove(); } }
+  }));
+}
+window.setFiltro = function(k){ filtro = k; redibujar(); };
+
+/* ---------- Punto de salida del recorrido ---------- */
+function origenActual(){
+  const o = recActivo().origen;
+  if(o) return {lat:o.lat, lng:o.lng, dir:o.dir||'Punto de salida'};
+  if(miPos) return {lat:miPos[0], lng:miPos[1], dir:'Mi ubicación (GPS)'};
+  return null;
+}
+function actualizarBarraSalida(){
+  const o = recActivo().origen;
+  const el = document.getElementById('salidaTxt');
+  if(!el) return;
+  const base = o
+    ? 'Salida: <b>' + escapar(o.dir||'Punto marcado') + '</b>'
+    : (miPos ? 'Salida: <b>Mi ubicación (GPS)</b>' : 'Salida: <b>Mi ubicación</b> — tocá 🎯 para el GPS');
+  el.innerHTML = base + (resumenRuta ? ` <span style="color:#1565c0;font-weight:700">· ${resumenRuta}</span>` : '');
+}
+function setOrigen(o){
+  recActivo().origen = o;   // null = usar GPS
+  guardar(); claveRuta = ''; redibujar();
+  toast(o ? ('🚩 Salida: ' + (o.dir||'punto marcado')) : '🚩 Salida: tu ubicación (GPS)');
+}
+
+/* Puntos del recorrido en orden: salida + paradas pendientes */
+function puntosRecorrido(){
+  const pts = stops.filter(esPendiente).map(s=>({lat:s.lat, lng:s.lng}));
+  const o = origenActual();
+  if(o) pts.unshift({lat:o.lat, lng:o.lng});
+  return pts;
+}
+
+/* Dibuja el camino REAL por las calles (no la línea recta) */
+async function dibujarRutaPorCalles(puntos){
+  if(puntos.length < 2 || puntos.length > 50) return;
+  const clave = (navModo||'pedestrian') + '|' + puntos.map(p=>p.lat.toFixed(5)+','+p.lng.toFixed(5)).join(';');
+  if(clave === claveRuta){
+    // ya está calculada: sacar la recta provisoria que acaba de redibujarse
+    if(rutaCalles && lineaRuta){ map.removeLayer(lineaRuta); lineaRuta = null; }
+    return;
+  }
+  claveRuta = clave;
+  try{
+    const r = await fetch('https://valhalla1.openstreetmap.de/route', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        locations: puntos.map(p=>({lat:p.lat, lon:p.lng})),
+        costing: (navModo==='auto' ? 'auto' : 'pedestrian'),
+        directions_options:{language:'es-ES', units:'kilometers'}
+      })
+    });
+    if(!r.ok) throw new Error('http '+r.status);
+    const j = await r.json();
+    if(clave !== claveRuta) return;    // llegó vieja: se pidió otra mientras tanto
+    let coords = [];
+    j.trip.legs.forEach(l=>{ coords = coords.concat(decodePoly6(l.shape)); });
+    if(!coords.length) return;
+    if(lineaRuta){ map.removeLayer(lineaRuta); lineaRuta = null; }   // sacar la recta provisoria
+    if(rutaCalles) map.removeLayer(rutaCalles);
+    if(rutaCallesBorde) map.removeLayer(rutaCallesBorde);
+    rutaCallesBorde = L.polyline(coords, {color:'#0d47a1', weight:9, opacity:.35}).addTo(map);
+    rutaCalles = L.polyline(coords, {color:'#1e88e5', weight:5, opacity:.95}).addTo(map);
+    rutaCallesBorde.bringToBack();
+    const km = j.trip.summary.length, min = Math.round(j.trip.summary.time/60);
+    resumenRuta = `${km.toFixed(1)} km · ${min} min`;
+    actualizarBarraSalida();
+  }catch(e){
+    claveRuta = ''; resumenRuta = '';   // permitir reintento
+  }
+}
+
+/* ---------- Acciones sobre domicilios ---------- */
+function agregarParada(dir, lat, lng){
+  stops.push({id:idNuevo(), dir, lat, lng, estado:'pendiente', nota:'', destinatario:'', expediente:'', intentos:[]});
+  guardar(); redibujar();
+  toast('Domicilio agregado ✓');
+  map.setView([lat,lng], 16);
+  abrirPanel(true);
+}
+window.comoLlegar = function(id, modo){
+  const s = stops.find(x=>x.id===id); if(!s) return;
+  const tm = modo==='auto' ? 'driving' : 'walking';
+  const url = `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}&travelmode=${tm}`;
+  window.open(url, '_blank');
+};
+
+/* ---------- Ficha de detalle ---------- */
+const detalle = document.getElementById('detalle');
+const detBody = document.getElementById('detBody');
+
+window.abrirDetalle = function(id){
+  const s = stops.find(x=>x.id===id); if(!s) return;
+  detalleActual = id;
+  detBody.innerHTML = `
+    <div class="tarjeta">
+      <h3>Domicilio</h3>
+      <div class="det-dir" id="detDir">${escapar(s.dir)}</div>
+      <button class="det-editar" onclick="editarDir()">✏️ Editar dirección</button>
+    </div>
+    <div class="tarjeta">
+      <h3>Datos de la cédula</h3>
+      <div class="campo"><label>Destinatario (a quién notifica)</label>
+        <input id="fDest" value="${escapar(s.destinatario)}" placeholder="Nombre y apellido"></div>
+      <div class="campo"><label>Expediente / Cédula Nº</label>
+        <input id="fExp" value="${escapar(s.expediente)}" placeholder="Ej: 12345/2025"></div>
+    </div>
+    <div class="tarjeta">
+      <h3>Resultado de la visita</h3>
+      <div class="estados" id="detEstados">
+        ${Object.keys(ESTADOS).map(k=>`
+          <button class="estado-btn ${s.estado===k?'sel':''}" style="${s.estado===k?`background:${ESTADOS[k].color}`:''}" onclick="setEstado('${k}')">
+            <span class="e">${ESTADOS[k].e}</span>${ESTADOS[k].etiqueta}
+          </button>`).join('')}
+      </div>
+    </div>
+    <div class="tarjeta">
+      <h3>🕘 Historial de visitas</h3>
+      <ul class="historial" id="historial"></ul>
+    </div>
+    <div class="tarjeta">
+      <h3>📝 Notas para el próximo recorrido</h3>
+      <textarea id="nota" placeholder="Ej: Reja verde. No estaba, volver después de las 18hs. Preguntar por...">${escapar(s.nota)}</textarea>
+    </div>
+    <div class="tarjeta">
+      <h3>📷 Fotos</h3>
+      <button class="btn-foto" onclick="elegirFoto()">📷 Sacar o elegir foto</button>
+      <div class="fotos-grid" id="fotosGrid"></div>
+    </div>
+    <button class="ba-llegar" style="width:100%;padding:16px;margin-bottom:8px;border:0;border-radius:12px;color:#fff;font-size:16px;font-weight:700" onclick="cerrarDetalle();navegarA('${s.id}')">▶️ Navegar paso a paso</button>
+    <div class="det-acciones">
+      <button class="ba-mapa" style="background:var(--azul)" onclick="comoLlegar('${s.id}')">🗺️ Google</button>
+      <button class="ba-mapa" onclick="verEnMapa('${s.id}')">📍 Ver</button>
+      <button class="ba-borrar" onclick="borrarDomicilio('${s.id}')">🗑️</button>
+    </div>`;
+  // guardar los campos mientras escribe
+  document.getElementById('nota').addEventListener('input', e=>{
+    const st = stops.find(x=>x.id===detalleActual); if(!st) return;
+    st.nota = e.target.value; guardar();
+  });
+  document.getElementById('fDest').addEventListener('input', e=>{
+    const st = stops.find(x=>x.id===detalleActual); if(!st) return;
+    st.destinatario = e.target.value; guardar();
+  });
+  document.getElementById('fExp').addEventListener('input', e=>{
+    const st = stops.find(x=>x.id===detalleActual); if(!st) return;
+    st.expediente = e.target.value; guardar();
+  });
+  renderHistorial();
+  cargarFotosEnFicha();
+  detalle.classList.add('ver');
+};
+function renderHistorial(){
+  const ul = document.getElementById('historial'); if(!ul) return;
+  const s = stops.find(x=>x.id===detalleActual); if(!s) return;
+  if(!s.intentos || !s.intentos.length){
+    ul.innerHTML = '<li style="color:#999">Sin visitas registradas. Marcá un resultado arriba y queda guardado con fecha.</li>';
+    return;
+  }
+  ul.innerHTML = s.intentos.slice().reverse().map(it=>{
+    const e = ESTADOS[it.estado] || {e:'•', etiqueta:it.estado};
+    return `<li><span class="pe">${e.e}</span> ${e.etiqueta} <span class="fe">${fechaCorta(it.fecha)}</span></li>`;
+  }).join('');
+}
+function cerrarDetalle(){ detalle.classList.remove('ver'); detalleActual = null; redibujar(); }
+document.getElementById('detVolver').addEventListener('click', cerrarDetalle);
+
+window.editarDir = function(){
+  const s = stops.find(x=>x.id===detalleActual); if(!s) return;
+  const nuevo = prompt('Dirección / referencia:', s.dir);
+  if(nuevo === null) return;
+  s.dir = nuevo.trim() || s.dir; guardar();
+  document.getElementById('detDir').textContent = s.dir;
+};
+window.setEstado = function(k){
+  const s = stops.find(x=>x.id===detalleActual); if(!s) return;
+  s.estado = k;
+  s.intentos = s.intentos || [];
+  s.intentos.push({fecha: Date.now(), estado: k});   // registrar la visita con fecha/hora
+  guardar();
+  renderHistorial();
+  // refrescar botones
+  document.querySelectorAll('#detEstados .estado-btn').forEach((b,idx)=>{
+    const key = Object.keys(ESTADOS)[idx];
+    const sel = key===k;
+    b.classList.toggle('sel', sel);
+    b.style.background = sel ? ESTADOS[key].color : '';
+  });
+  toast(ESTADOS[k].e + ' ' + ESTADOS[k].etiqueta);
+};
+window.verEnMapa = function(id){
+  cerrarDetalle();
+  const s = stops.find(x=>x.id===id); if(!s) return;
+  map.setView([s.lat,s.lng], 17);
+  abrirPanel(false);
+};
+window.borrarDomicilio = function(id){
+  const s = stops.find(x=>x.id===id); if(!s) return;
+  if(!confirm('¿Borrar este domicilio y todas sus fotos?\n'+s.dir)) return;
+  delFotosDeStop(id);
+  stops = stops.filter(x=>x.id!==id); guardar();
+  cerrarDetalle();
+};
+
+/* ---------- Fotos en la ficha ---------- */
+const inputFoto = document.getElementById('inputFoto');
+window.elegirFoto = function(){ inputFoto.value=''; inputFoto.click(); };
+inputFoto.addEventListener('change', async e=>{
+  const files = Array.from(e.target.files||[]);
+  if(!files.length || !detalleActual) return;
+  if(!db){ toast('Las fotos no están disponibles en este navegador'); return; }
+  toast('Guardando foto…');
+  for(const f of files){
+    try{ const data = await comprimirImagen(f); await addFoto(detalleActual, data); }
+    catch(err){ toast('No se pudo guardar una foto'); }
+  }
+  cargarFotosEnFicha();
+});
+function comprimirImagen(file, maxLado=1280, calidad=0.6){
+  return new Promise((res,rej)=>{
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = ()=>{
+      let w=img.width, h=img.height;
+      if(w>h && w>maxLado){ h=Math.round(h*maxLado/w); w=maxLado; }
+      else if(h>maxLado){ w=Math.round(w*maxLado/h); h=maxLado; }
+      const c=document.createElement('canvas'); c.width=w; c.height=h;
+      c.getContext('2d').drawImage(img,0,0,w,h);
+      URL.revokeObjectURL(url);
+      res(c.toDataURL('image/jpeg', calidad));
+    };
+    img.onerror = ()=>{ URL.revokeObjectURL(url); rej('error img'); };
+    img.src = url;
+  });
+}
+async function cargarFotosEnFicha(){
+  const grid = document.getElementById('fotosGrid'); if(!grid) return;
+  const fotos = await getFotos(detalleActual);
+  grid.innerHTML = fotos.map(f=>`<div class="foto-th"><img src="${f.dataURL}" onclick="verFoto(${f.id})"></div>`).join('');
+}
+window.verFoto = async function(fotoId){
+  const fotos = await getFotos(detalleActual);
+  const f = fotos.find(x=>x.id===fotoId); if(!f) return;
+  lbFotoId = fotoId;
+  document.getElementById('lbImg').src = f.dataURL;
+  document.getElementById('lightbox').classList.add('ver');
+};
+document.getElementById('lbCerrar').addEventListener('click', ()=> document.getElementById('lightbox').classList.remove('ver'));
+document.getElementById('lbBorrar').addEventListener('click', async ()=>{
+  if(lbFotoId!=null){ await delFoto(lbFotoId); lbFotoId=null; }
+  document.getElementById('lightbox').classList.remove('ver');
+  cargarFotosEnFicha();
+});
+
+/* ---------- Buscar dirección (Nominatim) ---------- */
+const input = document.getElementById('q');
+const cajaRes = document.getElementById('resultados');
+async function buscar(){
+  let texto = input.value.trim();
+  if(texto.length < 3){ toast('Escribí la calle y el número'); return; }
+  let consulta = /berisso/i.test(texto) ? texto : texto + ', Berisso, Buenos Aires, Argentina';
+  cajaRes.style.display='block';
+  cajaRes.innerHTML = `<div class="vacio">Buscando…</div>`;
+  try{
+    const url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=6'
+      + '&countrycodes=ar&viewbox=-57.95,-34.83,-57.78,-34.93&bounded=0&accept-language=es'
+      + '&q=' + encodeURIComponent(consulta);
+    const r = await fetch(url, {headers:{'Accept':'application/json'}});
+    mostrarResultados(await r.json());
+  }catch(e){
+    cajaRes.innerHTML = `<div class="vacio">No se pudo buscar (¿hay internet?). Podés tocar <b>➕📌</b> y marcar el lugar a mano.</div>`;
+  }
+}
+function mostrarResultados(datos){
+  if(!datos || datos.length===0){
+    cajaRes.innerHTML = `<div class="vacio">No encontré esa dirección.<br>Probá con calle y número, o tocá <b>➕📌</b> para marcarla en el mapa.</div>`;
+    return;
+  }
+  cajaRes.innerHTML = datos.map(d=>{
+    const nombre = nombreCorto(d);
+    return `<div class="res" data-lat="${d.lat}" data-lon="${d.lon}" data-nom="${escapar(nombre)}"><span class="ico">📍</span><span>${escapar(nombre)}</span></div>`;
+  }).join('');
+  cajaRes.querySelectorAll('.res').forEach(el=> el.addEventListener('click', ()=>{
+    const lat = parseFloat(el.dataset.lat), lng = parseFloat(el.dataset.lon);
+    if(buscandoSalida){
+      buscandoSalida = false;
+      input.placeholder = 'Calle y número (ej: Montevideo 1234)';
+      setOrigen({lat, lng, dir: el.dataset.nom});
+      map.setView([lat,lng], 16); abrirPanel(true);
+    }else{
+      agregarParada(el.dataset.nom, lat, lng);
+    }
+    cajaRes.style.display='none'; input.value='';
+  }));
+}
+function nombreCorto(d){
+  const a = d.address || {};
+  const calle = a.road || a.pedestrian || a.neighbourhood || '';
+  const num = a.house_number ? ' ' + a.house_number : '';
+  const barrio = a.suburb || a.town || a.city || 'Berisso';
+  if(calle) return `${calle}${num}, ${barrio}`;
+  return (d.display_name||'').split(',').slice(0,3).join(',');
+}
+document.getElementById('btnBuscar').addEventListener('click', buscar);
+input.addEventListener('keydown', e=>{ if(e.key==='Enter') buscar(); });
+input.addEventListener('input', ()=>{ if(input.value.trim()==='') cajaRes.style.display='none'; });
+
+/* ---------- Agregar tocando el mapa ---------- */
+const btnTocar = document.getElementById('btnTocar');
+const aviso = document.getElementById('aviso');
+btnTocar.addEventListener('click', ()=>{
+  modoTocar = !modoTocar;
+  btnTocar.classList.toggle('activo', modoTocar);
+  aviso.style.display = modoTocar ? 'block' : 'none';
+});
+map.on('click', e=>{
+  if(eligiendoSalida){
+    eligiendoSalida = false;
+    aviso.style.display='none'; aviso.textContent = 'Tocá en el mapa dónde está el domicilio 👆';
+    const nombre = prompt('¿Cómo le ponemos a este punto de salida?', 'Punto de salida');
+    if(nombre === null) return;
+    setOrigen({lat:e.latlng.lat, lng:e.latlng.lng, dir: nombre.trim() || 'Punto de salida'});
+    abrirPanel(true);
+    return;
+  }
+  if(!modoTocar) return;
+  const nombre = prompt('Nombre o referencia del domicilio:', 'Domicilio marcado');
+  if(nombre === null) return;
+  agregarParada(nombre.trim() || 'Domicilio marcado', e.latlng.lat, e.latlng.lng);
+  modoTocar = false; btnTocar.classList.remove('activo'); aviso.style.display='none';
+});
+
+/* ---------- Ubicación (GPS) ---------- */
+const btnUbic = document.getElementById('btnUbic');
+let siguiendo = false, watchId = null;
+const esIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+const AYUDA_IOS = '📱 En iPhone activá la ubicación así:\n\n'
+  + '1) Ajustes → Privacidad y seguridad → Localización → activá "Localización".\n'
+  + '2) En esa misma lista entrá en Safari (o Chrome) → elegí "Al usar la app" y activá "Ubicación exacta".\n'
+  + '3) Ajustes → Safari → Localización → ponelo en "Preguntar".\n'
+  + '4) Volvé a la página, recargá y tocá 🎯 → Permitir.';
+const AYUDA_ANDROID = 'En Android:\n• Tocá el candado 🔒 al lado del link → Permisos → Ubicación → Permitir.\n• Fijate que el GPS / Ubicación del celular esté PRENDIDO.\n• Recargá y tocá 🎯.';
+
+async function estadoPermiso(){
+  if(navigator.permissions && navigator.permissions.query){
+    try{ return (await navigator.permissions.query({name:'geolocation'})).state; }catch(e){ return 'desconocido'; }
+  }
+  return 'desconocido';
+}
+async function pedirUbicacion(){
+  if(!window.isSecureContext){ alert('⚠️ La ubicación necesita el link seguro.\n\nAbrí en Chrome:\nhttps://mapa-berisso.vercel.app'); return; }
+  if(!('geolocation' in navigator)){ alert('Este navegador no permite usar la ubicación. Probá abrir el link en Chrome.'); return; }
+  if(siguiendo){ centrarEnMi(); return; }
+  const estado = await estadoPermiso();
+  if(estado === 'denied'){ alert('🔒 La ubicación está BLOQUEADA para esta página.\n\n' + (esIOS ? AYUDA_IOS : AYUDA_ANDROID)); return; }
+  siguiendo = true; btnUbic.classList.add('activo');
+  toast('Buscando tu ubicación… tocá "Permitir"');
+  watchId = navigator.geolocation.watchPosition(pos=>{
+    const {latitude:lat, longitude:lng, accuracy} = pos.coords;
+    pintarUbic(lat, lng, accuracy);
+  }, err=>{
+    siguiendo = false; btnUbic.classList.remove('activo');
+    if(err.code===1) alert('No se permitió la ubicación (no apareció el cartel "Permitir").\n\n' + (esIOS ? AYUDA_IOS : AYUDA_ANDROID));
+    else if(err.code===2) alert('📡 No se pudo encontrar tu ubicación. Revisá que el GPS del celular esté PRENDIDO y probá de nuevo.');
+    else if(err.code===3) toast('Tardó demasiado. Probá de nuevo al aire libre 🎯');
+    else toast('No se pudo obtener la ubicación');
+  }, {enableHighAccuracy:true, maximumAge:5000, timeout:20000});
+}
+btnUbic.addEventListener('click', pedirUbicacion);
+
+let miPos = null, primeraVez = true;
+function pintarUbic(lat, lng, acc){
+  miPos = [lat,lng];
+  if(!capaUbic) capaUbic = L.layerGroup().addTo(map);
+  capaUbic.clearLayers();
+  L.circle([lat,lng], {radius:acc||30, color:'#1565c0', fillColor:'#1565c0', fillOpacity:.12, weight:1}).addTo(capaUbic);
+  L.circleMarker([lat,lng], {radius:8, color:'#fff', weight:3, fillColor:'#1565c0', fillOpacity:1}).addTo(capaUbic);
+  if(primeraVez){
+    map.setView([lat,lng], 16); primeraVez = false;
+    if(!recActivo().origen && !navActivo){ claveRuta=''; redibujar(); }  // ya hay salida real: trazar por calles
+  }
+  if(navActivo) navTick(lat, lng);   // alimentar la navegación paso a paso
+}
+function centrarEnMi(){ if(miPos) map.setView(miPos, 16); }
+
+/* ---------- Ordenar recorrido por cercanía ---------- */
+document.getElementById('btnOrdenar').addEventListener('click', async ()=>{
+  const pend = stops.filter(esPendiente);
+  if(pend.length < 2){ toast('Necesitás al menos 2 domicilios pendientes'); return; }
+  const notif = stops.filter(s=>!esPendiente(s));
+  let origen = origenActual();
+  if(!origen){
+    toast('Elegí desde dónde salís (tocá 🚩 Salida) o prendé el GPS 🎯');
+    origen = pend[0];
+  }
+
+  // 1) Intento fino: orden óptimo por CALLES reales (servicio de rutas)
+  if(pend.length <= 20){
+    toast('Calculando el mejor recorrido por las calles…');
+    const ok = await ordenarPorCalles(origen, pend, notif);
+    if(ok) return;
+  }
+  // 2) Respaldo: orden por cercanía en línea recta (siempre funciona, sin internet)
+  stops = vecinoMasCercano(origen, pend.slice()).concat(notif);
+  guardar(); claveRuta=''; redibujar();
+  toast('Ordenado por cercanía 📐');
+});
+
+async function ordenarPorCalles(origen, pend, notif){
+  try{
+    const locs = [{lat:origen.lat, lon:origen.lng}].concat(pend.map(s=>({lat:s.lat, lon:s.lng})));
+    const r = await fetch('https://valhalla1.openstreetmap.de/optimized_route', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        locations: locs,
+        costing: (navModo==='auto' ? 'auto' : 'pedestrian'),
+        directions_options:{language:'es-ES', units:'kilometers'}
+      })
+    });
+    if(!r.ok) throw new Error('http '+r.status);
+    const j = await r.json();
+    const orden = (j.trip.locations||[]).map(l=> l.original_index);
+    if(orden.length !== locs.length) throw new Error('orden incompleto');
+    const nuevos = [];
+    orden.forEach(oi=>{ if(oi > 0 && pend[oi-1]) nuevos.push(pend[oi-1]); });   // 0 = la salida
+    if(nuevos.length !== pend.length) throw new Error('faltan paradas');
+    stops = nuevos.concat(notif);
+    guardar(); claveRuta=''; redibujar();
+    const km = j.trip.summary.length, min = Math.round(j.trip.summary.time/60);
+    toast(`Recorrido armado 📐 ${km.toFixed(1)} km · ${min} min`);
+    return true;
+  }catch(e){ return false; }
+}
+function dist(a,b){ const dx=a.lat-b.lat, dy=a.lng-b.lng; return dx*dx+dy*dy; }
+function vecinoMasCercano(origen, lista){
+  const res=[]; let actual=origen;
+  while(lista.length){
+    let mejor=0;
+    for(let i=1;i<lista.length;i++){ if(dist(actual,lista[i])<dist(actual,lista[mejor])) mejor=i; }
+    actual=lista[mejor]; res.push(actual); lista.splice(mejor,1);
+  }
+  return res;
+}
+
+/* ---------- Ir a la próxima parada pendiente ---------- */
+document.getElementById('btnProxima').addEventListener('click', ()=>{
+  const prox = stops.find(esPendiente);
+  if(!prox){ toast('No hay domicilios pendientes 🎉'); return; }
+  navegarA(prox.id);
+});
+
+/* ---------- Menú (hoja de acciones) ---------- */
+const menu = document.getElementById('menu');
+function abrirMenu(){ menu.classList.add('ver'); }
+function cerrarMenu(){ menu.classList.remove('ver'); }
+document.getElementById('btnMenu').addEventListener('click', e=>{ e.stopPropagation(); abrirMenu(); });
+menu.addEventListener('click', e=>{ if(e.target===menu) cerrarMenu(); });
+document.getElementById('mCancelar').addEventListener('click', cerrarMenu);
+document.getElementById('mInforme').addEventListener('click', ()=>{ cerrarMenu(); generarInforme(); });
+document.getElementById('mCompartir').addEventListener('click', ()=>{ cerrarMenu(); abrirCompartir(); });
+document.getElementById('mCopiar').addEventListener('click', ()=>{ cerrarMenu(); copiarRespaldo(); });
+document.getElementById('mPegar').addEventListener('click', ()=>{ cerrarMenu(); pegarRespaldo(); });
+document.getElementById('mBorrar').addEventListener('click', ()=>{ cerrarMenu(); borrarTodo(); });
+
+function copiarRespaldo(){
+  const txt = JSON.stringify(stops);
+  navigator.clipboard?.writeText(txt).then(()=>toast('Respaldo copiado.'), ()=>prompt('Copiá este texto:', txt));
+}
+function pegarRespaldo(){
+  const txt = prompt('Pegá acá el respaldo:'); if(!txt) return;
+  try{ const d=JSON.parse(txt); if(Array.isArray(d)){ stops=d.map(s=>({...s,estado:s.estado||(s.hecha?'notificada':'pendiente'),nota:s.nota||'',destinatario:s.destinatario||'',expediente:s.expediente||'',intentos:Array.isArray(s.intentos)?s.intentos:[]})); guardar(); redibujar(); toast('Direcciones restauradas ✓'); } }
+  catch(err){ toast('El respaldo no es válido'); }
+}
+function borrarTodo(){
+  if(confirm('¿Borrar TODOS los domicilios? (las fotos también)')){
+    stops.forEach(s=>delFotosDeStop(s.id));
+    stops=[]; guardar(); redibujar();
+  }
+}
+
+/* ---------- Compartir recorrido (QR + link, sin servidor) ---------- */
+function b64urlEncode(str){ return btoa(unescape(encodeURIComponent(str))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
+function b64urlDecode(s){ s=s.replace(/-/g,'+').replace(/_/g,'/'); while(s.length%4) s+='='; return decodeURIComponent(escape(atob(s))); }
+function linkRecorrido(){
+  const r = recActivo();
+  const datos = {
+    n: r.nombre,
+    o: r.origen ? [+(+r.origen.lat).toFixed(6), +(+r.origen.lng).toFixed(6), r.origen.dir||''] : null,
+    s: stops.map(s=>[s.dir, +(+s.lat).toFixed(6), +(+s.lng).toFixed(6), s.estado, s.nota||'', s.destinatario||'', s.expediente||''])
+  };
+  return location.origin + location.pathname + '#r=' + b64urlEncode(JSON.stringify(datos));
+}
+const compartir = document.getElementById('compartir');
+function abrirCompartir(){
+  if(stops.length===0){ toast('Primero agregá domicilios al recorrido'); return; }
+  const link = linkRecorrido();
+  compartir.dataset.link = link;
+  const inp = document.getElementById('compLink'); if(inp) inp.value = link;
+  renderQR(link);
+  compartir.classList.add('ver');
+}
+function cerrarCompartir(){ compartir.classList.remove('ver'); }
+document.getElementById('compVolver').addEventListener('click', cerrarCompartir);
+
+function copiarTexto(txt, btn){
+  const ok = ()=>{
+    if(btn){ const orig = btn.dataset.orig || btn.textContent; btn.dataset.orig = orig; btn.textContent = '✅ ¡Copiado!'; setTimeout(()=>{ btn.textContent = orig; }, 1600); }
+    toast('Link copiado ✓');
+  };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(ok, ()=>copiaManual(txt, ok));
+  }else{
+    copiaManual(txt, ok);
+  }
+}
+function copiaManual(txt, ok){
+  try{
+    const ta = document.createElement('textarea');
+    ta.value = txt; ta.style.position='fixed'; ta.style.top='0'; ta.style.left='0'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    const exito = document.execCommand('copy');
+    document.body.removeChild(ta);
+    if(exito){ ok && ok(); return; }
+  }catch(e){}
+  const i = document.getElementById('compLink');
+  if(i){ i.focus(); i.select(); }
+  toast('Mantené apretado el link de arriba y elegí "Copiar"');
+}
+document.getElementById('compCopiar').addEventListener('click', e=>{
+  copiarTexto(compartir.dataset.link || '', e.currentTarget);
+});
+document.getElementById('compWA').addEventListener('click', ()=>{
+  const link = compartir.dataset.link || '';
+  const msg = 'Recorrido de cédulas: ' + link;
+  try{
+    if(navigator.share){ navigator.share({title:'Recorrido de cédulas', text:msg, url:link}).catch(()=>{}); return; }
+  }catch(_){}
+  const w = window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
+  if(!w){ copiarTexto(link, document.getElementById('compCopiar')); toast('Link copiado: pegalo en WhatsApp'); }
+});
+function renderQR(link){
+  const box = document.getElementById('qrBox');
+  box.innerHTML = '';
+  try{
+    if(typeof qrcode === 'undefined') throw new Error('sin libreria');
+    const qr = qrcode(0, 'L');
+    qr.addData(link); qr.make();
+    box.innerHTML = qr.createImgTag(5, 10);
+    const img = box.querySelector('img'); if(img){ img.removeAttribute('width'); img.removeAttribute('height'); }
+  }catch(e){
+    box.innerHTML = '<p style="color:#c62828;font-size:14px">El recorrido es muy grande para el código QR.<br>Usá “Copiar link” o “Compartir” de abajo.</p>';
+  }
+}
+
+/* ---------- Recibir un recorrido por link ---------- */
+function limpiarHash(){ try{ history.replaceState(null,'',location.pathname+location.search); }catch(e){ location.hash=''; } }
+function chequearImportar(){
+  const m = (location.hash||'').match(/[#&]r=([^&]+)/);
+  if(!m) return;
+  let datos;
+  try{ datos = JSON.parse(b64urlDecode(m[1])); }catch(e){ limpiarHash(); return; }
+  limpiarHash();
+
+  // Acepta el formato nuevo {n,o,s} y el viejo (array suelto)
+  const arr    = Array.isArray(datos) ? datos : (datos && datos.s);
+  const nombre = (datos && datos.n) ? datos.n : 'Recorrido recibido';
+  const orig   = (datos && datos.o) ? {lat:+datos.o[0], lng:+datos.o[1], dir:datos.o[2]||'Punto de salida'} : null;
+  if(!Array.isArray(arr) || !arr.length) return;
+
+  const recibidos = arr.map(a=>({
+    id: idNuevo(), dir:a[0]||'Domicilio', lat:+a[1], lng:+a[2],
+    estado:a[3]||'pendiente', nota:a[4]||'', destinatario:a[5]||'', expediente:a[6]||'', intentos:[]
+  })).filter(s=> isFinite(s.lat) && isFinite(s.lng));
+  if(!recibidos.length) return;
+  if(!confirm(`📥 Recibiste el recorrido "${nombre}" con ${recibidos.length} domicilio(s).\n\n¿Querés guardarlo en este teléfono?`)) return;
+
+  // Se guarda como un recorrido MÁS (no pisa lo que ya tenía)
+  const nuevo = recorridoNuevo(nombre, recibidos);
+  if(orig && isFinite(orig.lat) && isFinite(orig.lng)) nuevo.origen = orig;
+  almacen.lista.push(nuevo);
+  almacen.activo = nuevo.id;
+  localStorage.setItem(ALMACEN2, JSON.stringify(almacen));
+  aplicarRecorrido();
+  toast('Recorrido guardado ✓'); abrirPanel(true);
+}
+
+/* ---------- Informe imprimible del día (con fotos) ---------- */
+async function generarInforme(){
+  const w = window.open('', '_blank');
+  if(!w){ toast('Permití las ventanas emergentes para ver el informe'); return; }
+  w.document.write('<!doctype html><meta charset="utf-8"><title>Informe</title><body style="font-family:sans-serif;padding:24px;color:#444">Generando informe…</body>');
+
+  const conteo = {pendiente:0, notificada:0, ausente:0};
+  stops.forEach(s=>{ if(conteo[s.estado]!==undefined) conteo[s.estado]++; });
+
+  let cuerpo = '';
+  for(let i=0;i<stops.length;i++){
+    const s = stops[i]; const est = ESTADOS[s.estado];
+    const fotos = await getFotos(s.id);
+    const imgs = fotos.map(f=>`<img src="${f.dataURL}">`).join('');
+    const hist = (s.intentos||[]).map(it=>`${(ESTADOS[it.estado]||{}).etiqueta||it.estado} (${fechaCorta(it.fecha)})`).join(' · ');
+    const meta = [s.destinatario, s.expediente?('Exp. '+s.expediente):''].filter(Boolean).join(' · ');
+    cuerpo += `<div class="dom">
+      <div class="cab">
+        <span class="n" style="background:${est.color}">${i+1}</span>
+        <div><div class="d">${escapar(s.dir)}</div>${meta?`<div class="m">${escapar(meta)}</div>`:''}</div>
+        <span class="badge" style="background:${est.color}">${est.e} ${est.etiqueta}</span>
+      </div>
+      ${s.nota?`<div class="linea"><b>Notas:</b> ${escapar(s.nota)}</div>`:''}
+      ${hist?`<div class="linea"><b>Visitas:</b> ${escapar(hist)}</div>`:''}
+      ${imgs?`<div class="fotos">${imgs}</div>`:''}
+    </div>`;
+  }
+
+  const fecha = new Date().toLocaleDateString('es-AR',{weekday:'long', day:'2-digit', month:'long', year:'numeric'});
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Informe de cédulas</title>
+    <style>
+      body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#222;margin:0;padding:18px;}
+      h1{font-size:20px;margin:0 0 4px;}
+      .sub{color:#666;margin-bottom:14px;font-size:14px;text-transform:capitalize;}
+      .resumen{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;}
+      .resumen span{background:#eef2f7;border-radius:8px;padding:6px 12px;font-size:14px;font-weight:600;}
+      .dom{border:1px solid #e0e0e0;border-radius:12px;padding:12px;margin-bottom:12px;page-break-inside:avoid;}
+      .cab{display:flex;align-items:center;gap:10px;}
+      .cab .n{min-width:26px;height:26px;border-radius:50%;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex:0 0 auto;}
+      .cab .d{font-weight:700;font-size:16px;} .cab .m{color:#666;font-size:13px;}
+      .cab .badge{margin-left:auto;color:#fff;border-radius:10px;padding:3px 10px;font-size:12px;font-weight:700;white-space:nowrap;}
+      .linea{font-size:14px;margin-top:8px;}
+      .fotos{margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;}
+      .fotos img{width:130px;height:130px;object-fit:cover;border-radius:8px;border:1px solid #ddd;}
+      .imprimir{position:fixed;top:12px;right:12px;background:#1565c0;color:#fff;border:0;border-radius:24px;padding:12px 20px;font-size:15px;font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,.3);}
+      @media print{.imprimir{display:none}}
+    </style></head><body>
+      <button class="imprimir" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>
+      <h1>📍 Informe de reparto de cédulas</h1>
+      <div class="sub">${fecha} · ${stops.length} domicilio(s)</div>
+      <div class="resumen">
+        <span>🟠 Pendientes: ${conteo.pendiente}</span>
+        <span>✅ Notificadas: ${conteo.notificada}</span>
+        <span>🔴 No estaba: ${conteo.ausente}</span>
+      </div>
+      ${cuerpo || '<p>No hay domicilios cargados.</p>'}
+    </body></html>`;
+  w.document.open(); w.document.write(html); w.document.close();
+}
+
+/* ---------- Navegación paso a paso (dentro de la app) ---------- */
+let navActivo=false, navRuta=null, navManiobras=[], navIdx=0, navDestino=null;
+let navModo = localStorage.getItem('nav_modo') || 'pedestrian';
+let navMute = localStorage.getItem('nav_mute')==='1';
+let navCalculando=false, navUltReroute=0, navLlego=false, navHabladas={};
+let navLayer=null, navCasing=null;
+const elNav = document.getElementById('nav');
+
+function metros(a,b){
+  const R=6371000, t=Math.PI/180;
+  const dLat=(b.lat-a.lat)*t, dLng=(b.lng-a.lng)*t, la1=a.lat*t, la2=b.lat*t;
+  const x=Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(x));
+}
+function fmtDist(m){ return m>=1000 ? (m/1000).toFixed(1)+' km' : Math.max(5,Math.round(m/5)*5)+' m'; }
+function decodePoly6(str){
+  let i=0,lat=0,lng=0,c=[];
+  while(i<str.length){
+    let b,sh=0,r=0;
+    do{ b=str.charCodeAt(i++)-63; r|=(b&0x1f)<<sh; sh+=5; }while(b>=0x20);
+    lat += (r&1)?~(r>>1):(r>>1);
+    sh=0; r=0;
+    do{ b=str.charCodeAt(i++)-63; r|=(b&0x1f)<<sh; sh+=5; }while(b>=0x20);
+    lng += (r&1)?~(r>>1):(r>>1);
+    c.push([lat/1e6, lng/1e6]);
+  }
+  return c;
+}
+function hablar(txt){
+  if(navMute || !txt) return;
+  try{ const u=new SpeechSynthesisUtterance(txt); u.lang='es-ES'; u.rate=1; speechSynthesis.cancel(); speechSynthesis.speak(u); }catch(e){}
+}
+
+window.navegarA = function(id){
+  const s = stops.find(x=>x.id===id); if(!s) return;
+  navDestino = s; navRuta=null; navManiobras=[]; navIdx=0; navLlego=false; navHabladas={};
+  navActivo = true; document.body.classList.add('navegando');
+  // ocultar la línea del recorrido para que no se mezcle con la de navegación
+  if(rutaCalles){ map.removeLayer(rutaCalles); rutaCalles=null; }
+  if(rutaCallesBorde){ map.removeLayer(rutaCallesBorde); rutaCallesBorde=null; }
+  if(lineaRuta){ map.removeLayer(lineaRuta); lineaRuta=null; }
+  claveRuta = '';
+  actualizarBotonModo(); actualizarBotonVoz();
+  document.getElementById('navDest').textContent = '➡️ ' + s.dir;
+  document.getElementById('navInstr').textContent = 'Buscando tu ubicación…';
+  document.getElementById('navDist').textContent = '';
+  document.getElementById('navMeta').textContent = '';
+  document.getElementById('navSiguiente').style.display='none';
+  if(miPos){ calcularRutaNav(); }
+  else{ pedirUbicacion(); }   // al llegar la 1ª posición, navTick dispara el cálculo
+};
+function salirNav(){
+  navActivo=false; document.body.classList.remove('navegando');
+  try{ speechSynthesis.cancel(); }catch(e){}
+  if(navLayer){ map.removeLayer(navLayer); navLayer=null; }
+  if(navCasing){ map.removeLayer(navCasing); navCasing=null; }
+  redibujar();
+}
+
+async function calcularRutaNav(){
+  if(!navDestino || !miPos || navCalculando) return;
+  navCalculando = true;
+  document.getElementById('navInstr').textContent = 'Calculando ruta…';
+  try{
+    const o = {lat:miPos[0], lng:miPos[1]};
+    const body = {
+      locations:[{lat:o.lat,lon:o.lng},{lat:navDestino.lat,lon:navDestino.lng}],
+      costing: navModo,
+      directions_options:{language:'es-ES', units:'kilometers'}
+    };
+    const r = await fetch('https://valhalla1.openstreetmap.de/route', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
+    });
+    if(!r.ok) throw new Error('http '+r.status);
+    const j = await r.json();
+    const leg = j.trip.legs[0];
+    const shape = decodePoly6(leg.shape);
+    navManiobras = leg.maneuvers.map(m=>({
+      instruction: m.instruction,
+      pre: m.verbal_pre_transition_instruction || m.instruction,
+      latlng: { lat: shape[m.begin_shape_index][0], lng: shape[m.begin_shape_index][1] }
+    }));
+    navRuta = shape.map(c=>({lat:c[0], lng:c[1]}));
+    navIdx = 0; navUltReroute = Date.now(); navHabladas = {};
+    if(navLayer) map.removeLayer(navLayer);
+    if(navCasing) map.removeLayer(navCasing);
+    navCasing = L.polyline(shape, {color:'#0d47a1', weight:10, opacity:.45}).addTo(map);
+    navLayer  = L.polyline(shape, {color:'#42a5f5', weight:6,  opacity:1}).addTo(map);
+    document.getElementById('navMeta').textContent =
+      (navModo==='pedestrian'?'🚶 ':'🚗 ') + fmtDist(j.trip.summary.length*1000) + ' · ' + Math.max(1,Math.round(j.trip.summary.time/60)) + ' min aprox';
+    if(navManiobras[0]) hablar(navManiobras[0].pre);
+    navTick(miPos[0], miPos[1]);
+  }catch(e){
+    document.getElementById('navInstr').textContent = 'No se pudo calcular la ruta';
+    document.getElementById('navDist').textContent = 'Tocá 🗺️ Google para usar Google Maps';
+    toast('No se pudo calcular la ruta (¿hay señal?)');
+  }finally{
+    navCalculando = false;
+  }
+}
+
+function navTick(lat,lng){
+  if(!navActivo) return;
+  const pos = {lat, lng};
+  map.panTo([lat,lng], {animate:true, duration:.5});
+  if(!navRuta){ if(!navCalculando) calcularRutaNav(); return; }
+
+  // ¿llegó al destino?
+  const dDest = metros(pos, {lat:navDestino.lat, lng:navDestino.lng});
+  if(dDest < 25 && !navLlego){
+    navLlego = true;
+    document.getElementById('navInstr').textContent = '✅ Llegaste a destino';
+    document.getElementById('navDist').textContent = navDestino.dir;
+    document.getElementById('navSiguiente').style.display = '';
+    hablar('Llegaste a destino');
+    return;
+  }
+  if(navLlego) return;
+
+  // próxima maniobra (avanzar las que ya pasó)
+  let m = navManiobras[navIdx];
+  while(m && metros(pos, m.latlng) < 18 && navIdx < navManiobras.length-1){ navIdx++; m = navManiobras[navIdx]; }
+  if(m){
+    const dm = metros(pos, m.latlng);
+    document.getElementById('navInstr').textContent = m.instruction;
+    document.getElementById('navDist').textContent = 'En ' + fmtDist(dm);
+    if(dm < 80 && !navHabladas[navIdx]){ navHabladas[navIdx]=true; hablar(m.pre); }
+  }
+
+  // ¿se fue de la ruta? recalcular (con freno de 8s)
+  let minD = Infinity;
+  for(let i=0;i<navRuta.length;i+=2){ const d=metros(pos, navRuta[i]); if(d<minD) minD=d; }
+  if(minD > 45 && Date.now()-navUltReroute > 8000){
+    navUltReroute = Date.now(); hablar('Recalculando'); calcularRutaNav();
+  }
+}
+
+function actualizarBotonModo(){ document.getElementById('navModoBtn').textContent = navModo==='pedestrian' ? '🚶 A pie' : '🚗 En auto'; }
+function actualizarBotonVoz(){ const b=document.getElementById('navVoz'); b.textContent = navMute?'🔇':'🔊'; b.classList.toggle('mute', navMute); }
+document.getElementById('navModoBtn').addEventListener('click', ()=>{
+  navModo = navModo==='pedestrian' ? 'auto' : 'pedestrian';
+  localStorage.setItem('nav_modo', navModo); actualizarBotonModo();
+  navRuta=null; navHabladas={}; calcularRutaNav();
+});
+document.getElementById('navVoz').addEventListener('click', ()=>{
+  navMute = !navMute; localStorage.setItem('nav_mute', navMute?'1':'0'); actualizarBotonVoz();
+  if(navMute){ try{ speechSynthesis.cancel(); }catch(e){} } else { hablar('Voz activada'); }
+});
+document.getElementById('navGmaps').addEventListener('click', ()=>{ if(navDestino) comoLlegar(navDestino.id, navModo); });
+document.getElementById('navSalir').addEventListener('click', salirNav);
+document.getElementById('navSiguiente').addEventListener('click', ()=>{
+  const prox = stops.find(s=> esPendiente(s) && (!navDestino || s.id!==navDestino.id)) || stops.find(esPendiente);
+  if(prox && (!navDestino || prox.id!==navDestino.id)){ navegarA(prox.id); }
+  else{ toast('No hay más paradas pendientes 🎉'); salirNav(); }
+});
+
+/* ---------- Mis recorridos (varios guardados) ---------- */
+const hojaRec = document.getElementById('hojaRec');
+function abrirHojaRec(){ renderListaRec(); hojaRec.classList.add('ver'); }
+function cerrarHojaRec(){ hojaRec.classList.remove('ver'); }
+hojaRec.addEventListener('click', e=>{ if(e.target===hojaRec) cerrarHojaRec(); });
+document.getElementById('recCancelar').addEventListener('click', cerrarHojaRec);
+document.getElementById('tituloRec').addEventListener('click', e=>{ e.stopPropagation(); abrirHojaRec(); });
+
+function renderListaRec(){
+  document.getElementById('recLista').innerHTML = almacen.lista.map(r=>{
+    const pend = r.stops.filter(esPendiente).length;
+    const sel = r.id===almacen.activo;
+    return `<div style="display:flex;align-items:center">
+      <button class="rec-item ${sel?'sel':''}" onclick="cambiarRecorrido('${r.id}')" style="flex:1">
+        <span class="ri-t">${sel?'✔️ ':'📁 '}${escapar(r.nombre)}
+          <small>${r.stops.length} domicilio(s) · ${pend} pendiente(s)</small></span>
+      </button>
+      <button class="ri-x" onclick="borrarRecorrido('${r.id}')" title="Borrar">🗑️</button>
+    </div>`;
+  }).join('');
+}
+function aplicarRecorrido(){
+  stops = recActivo().stops;
+  document.getElementById('nombreRec').textContent = recActivo().nombre;
+  filtro = 'todos'; claveRuta = '';
+  if(rutaCalles){ map.removeLayer(rutaCalles); rutaCalles=null; }
+  if(rutaCallesBorde){ map.removeLayer(rutaCallesBorde); rutaCallesBorde=null; }
+  redibujar();
+  if(stops.length){ try{ map.fitBounds(L.featureGroup(Object.values(marcadores)).getBounds().pad(0.3)); }catch(e){} }
+}
+window.cambiarRecorrido = function(id){
+  almacen.activo = id; localStorage.setItem(ALMACEN2, JSON.stringify(almacen));
+  aplicarRecorrido(); cerrarHojaRec(); abrirPanel(true);
+  toast('📁 ' + recActivo().nombre);
+};
+window.borrarRecorrido = function(id){
+  const r = almacen.lista.find(x=>x.id===id); if(!r) return;
+  if(!confirm(`¿Borrar el recorrido "${r.nombre}"?\n\nSe borran sus ${r.stops.length} domicilio(s) y sus fotos.`)) return;
+  r.stops.forEach(s=> delFotosDeStop(s.id));
+  almacen.lista = almacen.lista.filter(x=>x.id!==id);
+  if(!almacen.lista.length){ const n = recorridoNuevo('Mi recorrido', []); almacen.lista=[n]; almacen.activo=n.id; }
+  if(!almacen.lista.some(x=>x.id===almacen.activo)) almacen.activo = almacen.lista[0].id;
+  localStorage.setItem(ALMACEN2, JSON.stringify(almacen));
+  aplicarRecorrido(); renderListaRec();
+};
+document.getElementById('recNuevo').addEventListener('click', ()=>{
+  const n = prompt('Nombre del recorrido nuevo:', 'Recorrido ' + (almacen.lista.length+1));
+  if(n===null) return;
+  const r = recorridoNuevo(n.trim() || ('Recorrido ' + (almacen.lista.length+1)), []);
+  almacen.lista.push(r); almacen.activo = r.id;
+  localStorage.setItem(ALMACEN2, JSON.stringify(almacen));
+  aplicarRecorrido(); cerrarHojaRec(); abrirPanel(true);
+  toast('📁 Recorrido nuevo creado');
+});
+document.getElementById('recRenombrar').addEventListener('click', ()=>{
+  const r = recActivo();
+  const n = prompt('Nuevo nombre:', r.nombre);
+  if(n===null) return;
+  r.nombre = n.trim() || r.nombre;
+  localStorage.setItem(ALMACEN2, JSON.stringify(almacen));
+  document.getElementById('nombreRec').textContent = r.nombre;
+  renderListaRec(); toast('Nombre cambiado ✓');
+});
+
+/* ---------- Elegir punto de salida ---------- */
+const hojaSalida = document.getElementById('hojaSalida');
+function abrirHojaSalida(){ hojaSalida.classList.add('ver'); }
+function cerrarHojaSalida(){ hojaSalida.classList.remove('ver'); }
+hojaSalida.addEventListener('click', e=>{ if(e.target===hojaSalida) cerrarHojaSalida(); });
+document.getElementById('salCancelar').addEventListener('click', cerrarHojaSalida);
+document.getElementById('barraSalida').addEventListener('click', abrirHojaSalida);
+
+document.getElementById('salGps').addEventListener('click', ()=>{
+  cerrarHojaSalida(); setOrigen(null);
+  if(!miPos) pedirUbicacion();
+});
+document.getElementById('salBuscar').addEventListener('click', ()=>{
+  cerrarHojaSalida(); buscandoSalida = true;
+  abrirPanel(false);
+  const i = document.getElementById('q');
+  i.value=''; i.placeholder='Dirección de SALIDA (ej: su casa)'; i.focus();
+  toast('Buscá la dirección desde donde sale 🚩');
+});
+document.getElementById('salMapa').addEventListener('click', ()=>{
+  cerrarHojaSalida(); eligiendoSalida = true; modoTocar = false;
+  document.getElementById('btnTocar').classList.remove('activo');
+  abrirPanel(false);
+  const av = document.getElementById('aviso');
+  av.textContent = '🚩 Tocá en el mapa desde dónde salís'; av.style.display='block';
+});
+document.getElementById('salPrimera').addEventListener('click', ()=>{
+  cerrarHojaSalida();
+  const p = stops.filter(esPendiente)[0] || stops[0];
+  if(!p){ toast('Todavía no hay domicilios'); return; }
+  setOrigen({lat:p.lat, lng:p.lng, dir:p.dir});
+});
+
+/* ---------- Panel inferior ---------- */
+const panel = document.getElementById('panel');
+document.getElementById('panelHead').addEventListener('click', e=>{
+  if(e.target.closest('.panel-acciones')) return;
+  panel.classList.toggle('abierto');
+});
+function abrirPanel(abrir){ panel.classList.toggle('abierto', abrir); }
+
+/* ---------- Bienvenida ---------- */
+const bienvenida = document.getElementById('bienvenida');
+function mostrarBienvenida(){ bienvenida.classList.add('ver'); }
+function cerrarBienvenida(){ bienvenida.classList.remove('ver'); localStorage.setItem('vio_ayuda','1'); pedirUbicacion(); }
+document.getElementById('btnEmpezar').addEventListener('click', cerrarBienvenida);
+document.getElementById('btnAyuda').addEventListener('click', mostrarBienvenida);
+if(!localStorage.getItem('vio_ayuda')) mostrarBienvenida();
+
+/* ---------- Arranque ---------- */
+abrirDB().then(()=>{
+  document.getElementById('nombreRec').textContent = recActivo().nombre;
+  guardar();   // consolida la migración del formato viejo al nuevo
+  redibujar();
+  if(stops.length){
+    try{ map.fitBounds(L.featureGroup(Object.values(marcadores)).getBounds().pad(0.3)); }catch(e){}
+  }
+  chequearImportar();   // ¿vino un recorrido por link/QR?
+});
+
+/* ---------- Funciona sin señal (Service Worker / PWA) ---------- */
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=> navigator.serviceWorker.register('sw.js').catch(()=>{}));
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "name": "Reparto de Cédulas",
+  "short_name": "Cédulas",
+  "description": "Mapa y recorrido para notificadores judiciales: domicilios, fotos, notas y GPS.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1565c0",
+  "theme_color": "#1565c0",
+  "lang": "es-AR",
+  "icons": [
+    { "src": "icono.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icono.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}
