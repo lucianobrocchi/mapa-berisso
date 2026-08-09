@@ -4,7 +4,7 @@
      si no hay internet, usa la copia guardada). Así nunca queda "vieja".
    - Librería Leaflet (CDN): CACHE-FIRST (no cambia).
    - Tiles del mapa: no se cachean (son demasiados). */
-const CACHE = 'cedulas-v3';
+const CACHE = 'cedulas-v5';
 const CORE = [
   './',
   './index.html',
@@ -35,10 +35,11 @@ self.addEventListener('fetch', e=>{
   // Tiles del mapa: dejar pasar a la red, sin cachear.
   if(url.hostname.endsWith('tile.openstreetmap.org')) return;
 
-  // HTML / navegación: network-first.
+  // HTML / navegación: network-first SIN pasar por el caché del navegador,
+  // así siempre baja la última versión publicada.
   if(req.mode === 'navigate' || url.pathname.endsWith('/') || url.pathname.endsWith('index.html')){
     e.respondWith(
-      fetch(req).then(r=>{
+      fetch(req.url, {cache:'no-store', credentials:'same-origin'}).then(r=>{
         const copia = r.clone();
         caches.open(CACHE).then(c=> c.put(req, copia)).catch(()=>{});
         return r;

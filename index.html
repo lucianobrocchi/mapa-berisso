@@ -345,8 +345,10 @@
     <button class="hb" id="mInforme">📄 Informe del día <span>Para imprimir o guardar PDF</span></button>
     <button class="hb" id="mCopiar">📋 Copiar respaldo <span>Texto con las direcciones (sin fotos)</span></button>
     <button class="hb" id="mPegar">📥 Pegar respaldo <span>Restaurar desde un texto copiado</span></button>
+    <button class="hb" id="mActualizar">🔄 Actualizar la app <span>Si no ves los cambios nuevos, tocá acá</span></button>
     <button class="hb peligro" id="mBorrar">🗑️ Borrar todos los domicilios</button>
     <button class="hb cancelar" id="mCancelar">Cancelar</button>
+    <div style="text-align:center;color:#aaa;font-size:12px;padding:6px 0 2px">versión <b id="verApp">—</b></div>
   </div>
 </div>
 
@@ -1173,6 +1175,20 @@ document.getElementById('mCompartir').addEventListener('click', ()=>{ cerrarMenu
 document.getElementById('mCopiar').addEventListener('click', ()=>{ cerrarMenu(); copiarRespaldo(); });
 document.getElementById('mPegar').addEventListener('click', ()=>{ cerrarMenu(); pegarRespaldo(); });
 document.getElementById('mBorrar').addEventListener('click', ()=>{ cerrarMenu(); borrarTodo(); });
+document.getElementById('mActualizar').addEventListener('click', async ()=>{
+  toast('Actualizando…');
+  try{
+    if('serviceWorker' in navigator){
+      const rs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(rs.map(r=> r.unregister()));
+    }
+    if(window.caches){
+      const ks = await caches.keys();
+      await Promise.all(ks.map(k=> caches.delete(k)));
+    }
+  }catch(e){}
+  location.replace(location.pathname + '?v=' + Date.now());   // saltea cualquier copia guardada
+});
 
 function copiarRespaldo(){
   const txt = JSON.stringify(stops);
@@ -1637,6 +1653,10 @@ abrirDB().then(()=>{
   }
   chequearImportar();   // ¿vino un recorrido por link/QR?
 });
+
+/* ---------- Versión de la app (para saber si está actualizada) ---------- */
+const VERSION = '3.2';
+document.getElementById('verApp').textContent = VERSION;
 
 /* ---------- Funciona sin señal (Service Worker / PWA) ---------- */
 if('serviceWorker' in navigator){
