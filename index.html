@@ -83,6 +83,10 @@
   .dir .tags{display:flex;gap:6px;margin-top:3px;flex-wrap:wrap;}
   .tag{font-size:11px;background:#eef2f7;color:#555;border-radius:10px;padding:1px 7px;}
   .item.notificada .dir b{text-decoration:line-through;color:#9e9e9e;}
+  .mover{display:flex;flex-direction:column;gap:3px;flex:0 0 auto;}
+  .mover button{border:0;background:#e8eef4;border-radius:6px;width:28px;height:21px;font-size:11px;line-height:1;color:#4a5b6b;padding:0;font-weight:700;}
+  .mover button:active{background:var(--azul);color:#fff;}
+  .mover button[disabled]{opacity:.3;}
   .item-btns{display:flex;gap:6px;flex:0 0 auto;}
   .ib{border:0;border-radius:8px;width:42px;height:42px;font-size:18px;background:var(--gris);}
   .ib.go{background:#e3f2fd;}
@@ -303,7 +307,8 @@
 
   <div class="paso"><div class="n">4</div>
     <b>Armá el recorrido</b>
-    <span>Tocá <span class="ej">📐 Ordenar</span> y las paradas se acomodan de la más cercana a la más lejana desde donde estás. Se dibuja la línea del camino en el mapa.</span>
+    <span>Tocá <span class="ej">📐 Ordenar</span> y las paradas se acomodan solas para caminar lo menos posible, siguiendo las calles.<br>
+    ¿Querés cambiar el orden vos? Usá las flechitas <span class="ej">▲▼</span> de cada domicilio.</span>
   </div>
 
   <div class="paso"><div class="n">5</div>
@@ -545,11 +550,11 @@ function redibujar(){
     marcadorSalida.bindPopup('<b>🚩 Salida</b><br>'+escapar(org.dir||'Punto marcado'));
   }
 
-  // Línea del recorrido: primero la recta provisoria, después la real por las calles
+  // Línea del recorrido: SIEMPRE por las calles (nunca la recta por arriba de las casas)
   const puntos = puntosRecorrido();
   if(puntos.length >= 2){
-    lineaRuta = L.polyline(puntos.map(p=>[p.lat,p.lng]), {color:'#1565c0', weight:3, opacity:.35, dashArray:'6,8'}).addTo(map);
-    dibujarRutaPorCalles(puntos);
+    clearTimeout(window._tRuta);
+    window._tRuta = setTimeout(()=> dibujarRutaPorCalles(puntos), 350);
   }else{
     if(rutaCalles){ map.removeLayer(rutaCalles); rutaCalles = null; }
     if(rutaCallesBorde){ map.removeLayer(rutaCallesBorde); rutaCallesBorde = null; }
@@ -580,11 +585,16 @@ function redibujar(){
     cont.innerHTML = `<div class="vacio-lista">No hay domicilios en este filtro.</div>`;
     return;
   }
-  cont.innerHTML = visibles.map(({s,i})=>{
+  cont.innerHTML = visibles.map(({s,i}, visIdx)=>{
     const est = ESTADOS[s.estado];
     const sub = [s.destinatario, s.expediente?('Exp. '+s.expediente):''].filter(Boolean).join(' · ');
     const ult = (s.intentos && s.intentos.length) ? s.intentos[s.intentos.length-1] : null;
+    const esPrim = visIdx === 0, esUlt = visIdx === visibles.length-1;
     return `<div class="item ${s.estado}">
+      <div class="mover">
+        <button onclick="event.stopPropagation();moverParada(${i},-1)" ${esPrim?'disabled':''} title="Subir">▲</button>
+        <button onclick="event.stopPropagation();moverParada(${i},1)" ${esUlt?'disabled':''} title="Bajar">▼</button>
+      </div>
       <div class="num" style="background:${est.color}">${i+1}</div>
       <div class="dir" onclick="abrirDetalle('${s.id}')">
         <b>${escapar(s.dir)}</b>
@@ -610,6 +620,19 @@ function redibujar(){
   }));
 }
 window.setFiltro = function(k){ filtro = k; redibujar(); };
+
+/* Reordenar a mano: sube o baja una parada en el recorrido */
+window.moverParada = function(i, dir){
+  if(i < 0 || i >= stops.length) return;
+  let j = i + dir;                                  // buscar el vecino que se está viendo
+  while(j >= 0 && j < stops.length && !coincideFiltro(stops[j])) j += dir;
+  if(j < 0 || j >= stops.length) return;
+  const [item] = stops.splice(i, 1);
+  stops.splice(j, 0, item);
+  guardar();
+  claveRuta = '';                                   // el camino cambió: recalcular por calles
+  redibujar();
+};
 
 /* ---------- Punto de salida del recorrido ---------- */
 function origenActual(){
@@ -641,32 +664,36 @@ function puntosRecorrido(){
   return pts;
 }
 
-/* Dibuja el camino REAL por las calles (no la línea recta) */
-async function dibujarRutaPorCalles(puntos){
+/* Dibuja el camino REAL por las calles.
+   Nunca dibuja la línea recta: si no se puede calcular, no muestra nada y avisa. */
+async function dibujarRutaPorCalles(puntos, intento){
   if(puntos.length < 2 || puntos.length > 50) return;
+  intento = intento || 1;
   const clave = (navModo||'pedestrian') + '|' + puntos.map(p=>p.lat.toFixed(5)+','+p.lng.toFixed(5)).join(';');
-  if(clave === claveRuta){
-    // ya está calculada: sacar la recta provisoria que acaba de redibujarse
-    if(rutaCalles && lineaRuta){ map.removeLayer(lineaRuta); lineaRuta = null; }
-    return;
-  }
+  if(clave === claveRuta && rutaCalles) return;    // ya está dibujada
   claveRuta = clave;
+  if(intento === 1){
+    resumenRuta = 'trazando por las calles…';
+    actualizarBarraSalida();
+  }
   try{
+    const ctrl = new AbortController();
+    const corte = setTimeout(()=>ctrl.abort(), 15000);
     const r = await fetch('https://valhalla1.openstreetmap.de/route', {
-      method:'POST', headers:{'Content-Type':'application/json'},
+      method:'POST', headers:{'Content-Type':'application/json'}, signal: ctrl.signal,
       body: JSON.stringify({
         locations: puntos.map(p=>({lat:p.lat, lon:p.lng})),
         costing: (navModo==='auto' ? 'auto' : 'pedestrian'),
         directions_options:{language:'es-ES', units:'kilometers'}
       })
     });
+    clearTimeout(corte);
     if(!r.ok) throw new Error('http '+r.status);
     const j = await r.json();
     if(clave !== claveRuta) return;    // llegó vieja: se pidió otra mientras tanto
     let coords = [];
-    j.trip.legs.forEach(l=>{ coords = coords.concat(decodePoly6(l.shape)); });
-    if(!coords.length) return;
-    if(lineaRuta){ map.removeLayer(lineaRuta); lineaRuta = null; }   // sacar la recta provisoria
+    (j.trip.legs||[]).forEach(l=>{ coords = coords.concat(decodePoly6(l.shape)); });
+    if(coords.length < 2) throw new Error('sin trazado');
     if(rutaCalles) map.removeLayer(rutaCalles);
     if(rutaCallesBorde) map.removeLayer(rutaCallesBorde);
     rutaCallesBorde = L.polyline(coords, {color:'#0d47a1', weight:9, opacity:.35}).addTo(map);
@@ -676,7 +703,16 @@ async function dibujarRutaPorCalles(puntos){
     resumenRuta = `${km.toFixed(1)} km · ${min} min`;
     actualizarBarraSalida();
   }catch(e){
-    claveRuta = ''; resumenRuta = '';   // permitir reintento
+    if(clave !== claveRuta) return;
+    if(intento < 3){                                  // reintentar solo, sin molestar
+      setTimeout(()=>{ claveRuta=''; dibujarRutaPorCalles(puntos, intento+1); }, intento*1500);
+      return;
+    }
+    claveRuta = ''; resumenRuta = '';
+    if(rutaCalles){ map.removeLayer(rutaCalles); rutaCalles = null; }
+    if(rutaCallesBorde){ map.removeLayer(rutaCallesBorde); rutaCallesBorde = null; }
+    actualizarBarraSalida();
+    toast('Sin señal para trazar por las calles — tocá 📐 para reintentar');
   }
 }
 
