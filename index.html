@@ -77,7 +77,8 @@
 
   #lista{overflow-y:auto;padding:4px 8px 18px;}
   .item{display:flex;align-items:center;gap:10px;padding:10px 6px;border-bottom:1px solid #f0f0f0;}
-  .num{min-width:30px;height:30px;border-radius:50%;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex:0 0 auto;}
+  .num{min-width:32px;height:32px;border-radius:50%;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex:0 0 auto;border:0;padding:0;font-family:inherit;cursor:pointer;box-shadow:0 0 0 2px rgba(255,255,255,.9), 0 0 0 3px rgba(0,0,0,.08);}
+  .num:active{transform:scale(.9);}
   .dir{flex:1;font-size:15px;line-height:1.25;word-break:break-word;}
   .dir small{display:block;color:#888;font-size:12px;margin-top:2px;}
   .dir .tags{display:flex;gap:6px;margin-top:3px;flex-wrap:wrap;}
@@ -308,7 +309,7 @@
   <div class="paso"><div class="n">4</div>
     <b>Armá el recorrido</b>
     <span>Tocá <span class="ej">📐 Ordenar</span> y las paradas se acomodan solas para caminar lo menos posible, siguiendo las calles.<br>
-    ¿Querés cambiar el orden vos? Usá las flechitas <span class="ej">▲▼</span> de cada domicilio.</span>
+    ¿Querés cambiar el orden vos? Usá las flechitas <span class="ej">▲▼</span>, o <b>tocá el número</b> del domicilio para mandarlo a otro lugar (ej: del 55 al 6).</span>
   </div>
 
   <div class="paso"><div class="n">5</div>
@@ -597,7 +598,8 @@ function redibujar(){
         <button onclick="event.stopPropagation();moverParada(${i},-1)" ${esPrim?'disabled':''} title="Subir">▲</button>
         <button onclick="event.stopPropagation();moverParada(${i},1)" ${esUlt?'disabled':''} title="Bajar">▼</button>
       </div>
-      <div class="num" style="background:${est.color}">${i+1}</div>
+      <button class="num" style="background:${est.color}" title="Tocá para cambiarlo de lugar"
+              onclick="event.stopPropagation();moverAPosicion(${i})">${i+1}</button>
       <div class="dir" onclick="abrirDetalle('${s.id}')">
         <b>${escapar(s.dir)}</b>
         ${sub?`<small>${escapar(sub)}</small>`:''}
@@ -622,6 +624,29 @@ function redibujar(){
   }));
 }
 window.setFiltro = function(k){ filtro = k; redibujar(); };
+
+/* Mover una parada a un lugar exacto del recorrido.
+   Ej: el 55 al lugar 6 -> queda entre el 5 y el 6, y los demás se corren. */
+window.moverAPosicion = function(i){
+  if(i < 0 || i >= stops.length) return;
+  const total = stops.length, actual = i + 1;
+  const txt = prompt(
+    `📍 ${stops[i].dir}\n\nAhora está en el lugar ${actual} de ${total}.\n` +
+    `¿A qué número lo querés mover?\n(ej: poner 6 lo deja entre el 5 y el 6)`,
+    String(actual)
+  );
+  if(txt === null) return;
+  let destino = parseInt(String(txt).trim(), 10);
+  if(!isFinite(destino)){ toast('Escribí un número'); return; }
+  destino = Math.max(1, Math.min(total, destino));
+  if(destino === actual) return;
+  const [item] = stops.splice(i, 1);
+  stops.splice(destino - 1, 0, item);
+  guardar();
+  claveRuta = '';                                   // el camino cambió: recalcular por calles
+  redibujar();
+  toast(`Movido al lugar ${destino} ✓`);
+};
 
 /* Reordenar a mano: sube o baja una parada en el recorrido */
 window.moverParada = function(i, dir){
@@ -669,7 +694,7 @@ function puntosRecorrido(){
 /* Dibuja el camino REAL por las calles.
    Nunca dibuja la línea recta: si no se puede calcular, no muestra nada y avisa. */
 async function dibujarRutaPorCalles(puntos, intento){
-  if(puntos.length < 2 || puntos.length > 50) return;
+  if(puntos.length < 2 || puntos.length > 80) return;
   intento = intento || 1;
   const clave = (navModo||'pedestrian') + '|' + puntos.map(p=>p.lat.toFixed(5)+','+p.lng.toFixed(5)).join(';');
   if(clave === claveRuta && rutaCalles) return;    // ya está dibujada
@@ -679,29 +704,29 @@ async function dibujarRutaPorCalles(puntos, intento){
     actualizarBarraSalida();
   }
   try{
+    // OSRM aguanta muchas paradas de una (Valhalla sólo admite 10 y fallaba en silencio)
+    const perfil = (navModo === 'auto')
+      ? {srv:'routed-car',  p:'driving'}
+      : {srv:'routed-foot', p:'foot'};
+    const coordsUrl = puntos.map(p=> p.lng.toFixed(6)+','+p.lat.toFixed(6)).join(';');
+    const url = `https://routing.openstreetmap.de/${perfil.srv}/route/v1/${perfil.p}/${coordsUrl}`
+              + '?overview=full&geometries=polyline6';
     const ctrl = new AbortController();
-    const corte = setTimeout(()=>ctrl.abort(), 15000);
-    const r = await fetch('https://valhalla1.openstreetmap.de/route', {
-      method:'POST', headers:{'Content-Type':'application/json'}, signal: ctrl.signal,
-      body: JSON.stringify({
-        locations: puntos.map(p=>({lat:p.lat, lon:p.lng})),
-        costing: (navModo==='auto' ? 'auto' : 'pedestrian'),
-        directions_options:{language:'es-ES', units:'kilometers'}
-      })
-    });
+    const corte = setTimeout(()=>ctrl.abort(), 20000);
+    const r = await fetch(url, {signal: ctrl.signal});
     clearTimeout(corte);
     if(!r.ok) throw new Error('http '+r.status);
     const j = await r.json();
     if(clave !== claveRuta) return;    // llegó vieja: se pidió otra mientras tanto
-    let coords = [];
-    (j.trip.legs||[]).forEach(l=>{ coords = coords.concat(decodePoly6(l.shape)); });
+    if(j.code !== 'Ok' || !j.routes || !j.routes.length) throw new Error('sin trazado');
+    const coords = decodePoly6(j.routes[0].geometry);
     if(coords.length < 2) throw new Error('sin trazado');
     if(rutaCalles) map.removeLayer(rutaCalles);
     if(rutaCallesBorde) map.removeLayer(rutaCallesBorde);
     rutaCallesBorde = L.polyline(coords, {color:'#0d47a1', weight:9, opacity:.35}).addTo(map);
     rutaCalles = L.polyline(coords, {color:'#1e88e5', weight:5, opacity:.95}).addTo(map);
     rutaCallesBorde.bringToBack();
-    const km = j.trip.summary.length, min = Math.round(j.trip.summary.time/60);
+    const km = j.routes[0].distance/1000, min = Math.round(j.routes[0].duration/60);
     resumenRuta = `${km.toFixed(1)} km · ${min} min`;
     actualizarBarraSalida();
   }catch(e){
@@ -1042,108 +1067,159 @@ document.getElementById('btnOrdenar').addEventListener('click', async ()=>{
     origen = pend[0];
   }
 
-  // 1) Intento fino: orden óptimo por CALLES reales (matriz + 2-opt)
-  if(pend.length <= 40){
-    toast('Calculando el mejor recorrido por las calles…');
+  // 1) Intento fino: orden óptimo por CALLES reales (matriz + 2-opt + Or-opt)
+  if(pend.length <= 60){
+    toast(pend.length > 20
+      ? `Calculando el mejor recorrido para ${pend.length} paradas… (puede tardar unos segundos)`
+      : 'Calculando el mejor recorrido por las calles…');
     const ok = await ordenarPorCalles(origen, pend, notif);
     if(ok) return;
   }
   // 2) Respaldo: orden por cercanía en línea recta (siempre funciona, sin internet)
   stops = vecinoMasCercano(origen, pend.slice()).concat(notif);
   guardar(); claveRuta=''; redibujar();
-  toast(pend.length > 40
-    ? 'Ordenado por cercanía (son muchas paradas para el cálculo fino)'
-    : 'Ordenado por cercanía — sin señal para calcular por las calles');
+  toast(pend.length > 60
+    ? `Ordenado por cercanía: ${pend.length} paradas es demasiado para el cálculo fino`
+    : 'Ordenado por cercanía — no se pudo consultar las calles (¿hay señal?)');
 });
 
-/* Ordena el recorrido usando DISTANCIAS REALES POR CALLE.
-   1) Pide la matriz calle-a-calle entre todos los puntos (1 sola llamada).
-   2) Arma una primera vuelta con "el más cercano al más cercano".
-   3) La mejora con 2-opt y Or-opt (deshace cruces y reubica paradas sueltas).
-   Es ruta ABIERTA: arranca en la salida y termina donde convenga (no fuerza el final). */
+/* Matriz de tiempos REALES calle a calle entre todos los puntos.
+   Usa OSRM (aguanta matrices grandes: 60x60 sin problema).
+   Valhalla NO sirve acá: su límite es de 100 pares (o sea 10 paradas) y falla en silencio. */
+async function matrizPorCalles(puntos, modo){
+  const perfil = (modo === 'auto')
+    ? {srv:'routed-car',  p:'driving'}
+    : {srv:'routed-foot', p:'foot'};
+  const coords = puntos.map(p => p.lng.toFixed(6) + ',' + p.lat.toFixed(6)).join(';');
+  const url = `https://routing.openstreetmap.de/${perfil.srv}/table/v1/${perfil.p}/${coords}?annotations=duration`;
+  const ctrl = new AbortController();
+  const corte = setTimeout(()=> ctrl.abort(), 40000);
+  try{
+    const r = await fetch(url, {signal: ctrl.signal});
+    if(!r.ok) throw new Error('http ' + r.status);
+    const j = await r.json();
+    if(j.code !== 'Ok' || !Array.isArray(j.durations)) throw new Error('sin matriz');
+    if(j.durations.length !== puntos.length) throw new Error('matriz incompleta');
+    return j.durations;                      // segundos (puede traer algún null)
+  } finally {
+    clearTimeout(corte);
+  }
+}
+
+/* Ordena el recorrido usando TIEMPOS REALES POR CALLE.
+   1) Matriz calle a calle entre todos los puntos (1 sola consulta).
+   2) Primera vuelta con "del más cercano al más cercano".
+   3) La mejora con 2-opt (deshace cruces) y Or-opt (reagrupa por zona).
+   Ruta ABIERTA: arranca en la salida y termina donde convenga. */
 async function ordenarPorCalles(origen, pend, notif){
   try{
-    const locs = [{lat:origen.lat, lon:origen.lng}].concat(pend.map(s=>({lat:s.lat, lon:s.lng})));
-    const r = await fetch('https://valhalla1.openstreetmap.de/sources_to_targets', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        sources: locs, targets: locs,
-        costing: (navModo==='auto' ? 'auto' : 'pedestrian')
-      })
-    });
-    if(!r.ok) throw new Error('http '+r.status);
-    const j = await r.json();
-    const filas = j.sources_to_targets;
-    if(!filas || filas.length !== locs.length) throw new Error('matriz incompleta');
+    const puntos = [{lat:origen.lat, lng:origen.lng}].concat(pend.map(s=>({lat:s.lat, lng:s.lng})));
+    const N = puntos.length;
+    const crudo = await matrizPorCalles(puntos, navModo);
 
-    const N = locs.length;
-    const INF = 1e9;
-    // Costo = tiempo real de viaje (si no viene, uso la distancia)
-    const M = filas.map(fila => fila.map(c=>{
-      if(!c) return INF;
-      const v = (c.time != null) ? c.time : (c.distance != null ? c.distance*1000 : null);
-      return (v == null) ? INF : v;
-    }));
-    // Si el servicio no pudo resolver algún par, uso la distancia en línea recta como respaldo
-    for(let i=0;i<N;i++) for(let k=0;k<N;k++){
-      if(M[i][k] >= INF && i!==k){
-        const a = i===0?origen:pend[i-1], b = k===0?origen:pend[k-1];
-        M[i][k] = metros(a,b) * 1.35;      // penaliza porque en la calle siempre se camina más
+    // Relleno los pares que el servicio no pudo resolver, estimando por línea recta
+    const vel = (navModo === 'auto') ? 8.5 : 1.35;      // metros por segundo
+    const M = [];
+    for(let i=0;i<N;i++){
+      M.push(new Float64Array(N));
+      for(let k=0;k<N;k++){
+        const v = crudo[i] ? crudo[i][k] : null;
+        M[i][k] = (v == null || !isFinite(v))
+          ? (metros(puntos[i], puntos[k]) * 1.35) / vel
+          : v;
       }
     }
 
-    const costo = ruta => { let t=0; for(let i=0;i<ruta.length-1;i++) t += M[ruta[i]][ruta[i+1]]; return t; };
+    const costo = r => { let t=0; for(let i=0;i<r.length-1;i++) t += M[r[i]][r[i+1]]; return t; };
 
     // (2) Vecino más cercano desde la salida
-    let ruta=[0], falta=new Set();
+    let ruta = [0];
+    const falta = new Set();
     for(let i=1;i<N;i++) falta.add(i);
     while(falta.size){
       const act = ruta[ruta.length-1];
       let mejor=null, mejorC=Infinity;
-      falta.forEach(i=>{ if(M[act][i] < mejorC){ mejorC=M[act][i]; mejor=i; } });
+      falta.forEach(i=>{ if(M[act][i] < mejorC){ mejorC = M[act][i]; mejor = i; } });
       ruta.push(mejor); falta.delete(mejor);
     }
 
-    // (3) 2-opt: desarma los cruces (ruta abierta, la salida queda fija)
-    let mejoro = true, vueltas = 0;
-    while(mejoro && vueltas < 60){
-      mejoro = false; vueltas++;
-      for(let i=1; i<ruta.length-1; i++){
-        for(let k=i+1; k<ruta.length; k++){
-          const a=ruta[i-1], b=ruta[i], c=ruta[k], d=(k+1<ruta.length)?ruta[k+1]:null;
-          const antes  = M[a][b] + (d!==null ? M[c][d] : 0);
-          const despues= M[a][c] + (d!==null ? M[b][d] : 0);
-          if(despues < antes - 1e-9){
-            const seg = ruta.slice(i,k+1).reverse();
-            ruta = ruta.slice(0,i).concat(seg, ruta.slice(k+1));
-            mejoro = true;
+    // (3) Mejora local: 2-opt (deshace cruces) + Or-opt (reagrupa por zona).
+    //     Evalúa sólo lo que cambia, así es instantáneo aun con 60 paradas.
+    const pulir = (r, limite)=>{
+      let mejoro = true, vueltas = 0;
+      while(mejoro && vueltas < 50 && Date.now() < limite){
+        mejoro = false; vueltas++;
+        for(let i=1; i<r.length-1 && Date.now()<limite; i++){
+          for(let k=i+1; k<r.length; k++){
+            const a=r[i-1], b=r[i], c=r[k], d=(k+1<r.length)?r[k+1]:null;
+            const antes   = M[a][b] + (d!==null ? M[c][d] : 0);
+            const despues = M[a][c] + (d!==null ? M[b][d] : 0);
+            if(despues < antes - 1e-9){
+              for(let x=i, y=k; x<y; x++, y--){ const t=r[x]; r[x]=r[y]; r[y]=t; }
+              mejoro = true;
+            }
+          }
+        }
+        for(let L=1; L<=3 && Date.now()<limite; L++){
+          for(let i=1; i+L<=r.length; i++){
+            const ini=r[i], fin=r[i+L-1];
+            const prev=r[i-1], sig=(i+L<r.length)?r[i+L]:null;
+            const ahorro = M[prev][ini] + (sig!==null ? M[fin][sig] : 0)
+                         - (sig!==null ? M[prev][sig] : 0);
+            let mejorP=-1, mejorDelta=-1e-9, mejorInv=false;
+            for(let p=0; p<r.length; p++){
+              if(p >= i-1 && p <= i+L-1) continue;       // adentro del propio tramo
+              const a=r[p], b=(p+1<r.length)?r[p+1]:null;
+              const base = (b!==null ? M[a][b] : 0);
+              const costoDer = M[a][ini] + (b!==null ? M[fin][b] : 0) - base;
+              const costoInv = M[a][fin] + (b!==null ? M[ini][b] : 0) - base;
+              const usaInv = costoInv < costoDer;
+              const delta = ahorro - (usaInv ? costoInv : costoDer);
+              if(delta > mejorDelta){ mejorDelta = delta; mejorP = p; mejorInv = usaInv; }
+            }
+            if(mejorP >= 0){
+              const seg = r.slice(i, i+L);
+              if(mejorInv) seg.reverse();
+              r.splice(i, L);
+              r.splice((mejorP < i) ? mejorP+1 : mejorP+1-L, 0, ...seg);
+              mejoro = true;
+            }
           }
         }
       }
-      // Or-opt: mover 1..3 paradas seguidas a otro lugar (junta las de la misma cuadra/zona)
-      for(let largo=1; largo<=3; largo++){
-        for(let i=1; i+largo<=ruta.length; i++){
-          const seg = ruta.slice(i, i+largo);
-          const resto = ruta.slice(0,i).concat(ruta.slice(i+largo));
-          for(let p=1; p<=resto.length; p++){
-            if(p===i) continue;
-            const cand = resto.slice(0,p).concat(seg, resto.slice(p));
-            if(costo(cand) < costo(ruta) - 1e-9){ ruta = cand; mejoro = true; }
-          }
-        }
-      }
-    }
+      return r;
+    };
 
-    const nuevos = ruta.slice(1).map(i=> pend[i-1]).filter(Boolean);
+    // (4) Como el cálculo es rapidísimo, uso el tiempo que sobra para probar
+    //     variantes del recorrido y quedarme con la más corta.
+    const finPresupuesto = Date.now() + 1800;
+    ruta = pulir(ruta, finPresupuesto);
+    let mejorRuta = ruta.slice(), mejorCosto = costo(ruta);
+    while(Date.now() < finPresupuesto && N > 5){
+      const cand = mejorRuta.slice();
+      // "double bridge": corta el recorrido en 4 y recombina, para salir de un mínimo local
+      const n = cand.length;
+      const c1 = 1 + Math.floor(Math.random()*(n-3));
+      const c2 = c1 + 1 + Math.floor(Math.random()*(n-c1-2));
+      const c3 = c2 + 1 + Math.floor(Math.random()*(n-c2-1));
+      const nueva = cand.slice(0,c1).concat(cand.slice(c2,c3), cand.slice(c1,c2), cand.slice(c3));
+      pulir(nueva, finPresupuesto);
+      const c = costo(nueva);
+      if(c < mejorCosto - 1e-9){ mejorCosto = c; mejorRuta = nueva; }
+    }
+    ruta = mejorRuta;
+
+    const nuevos = ruta.slice(1).map(i => pend[i-1]).filter(Boolean);
     if(nuevos.length !== pend.length) throw new Error('faltan paradas');
     stops = nuevos.concat(notif);
     guardar(); claveRuta=''; redibujar();
 
-    const seg = costo(ruta);
-    const min = Math.round(seg/60);
-    toast(`Recorrido optimizado 📐 ${min} min de viaje`);
+    const min = Math.round(costo(ruta)/60);
+    toast(`Recorrido optimizado 📐 ${pend.length} paradas · ${min} min de viaje`);
     return true;
-  }catch(e){ return false; }
+  }catch(e){
+    return false;
+  }
 }
 function dist(a,b){ const dx=a.lat-b.lat, dy=a.lng-b.lng; return dx*dx+dy*dy; }
 function vecinoMasCercano(origen, lista){
@@ -1655,7 +1731,7 @@ abrirDB().then(()=>{
 });
 
 /* ---------- Versión de la app (para saber si está actualizada) ---------- */
-const VERSION = '3.2';
+const VERSION = '3.3';
 document.getElementById('verApp').textContent = VERSION;
 
 /* ---------- Funciona sin señal (Service Worker / PWA) ---------- */
