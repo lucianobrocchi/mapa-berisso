@@ -32,8 +32,9 @@ self.addEventListener('fetch', e=>{
   let url;
   try{ url = new URL(req.url); }catch(_){ return; }
 
-  // Tiles del mapa: dejar pasar a la red, sin cachear.
+  // Tiles del mapa y estadísticas: dejar pasar a la red, sin cachear.
   if(url.hostname.endsWith('tile.openstreetmap.org')) return;
+  if(url.hostname.endsWith('umami.is')) return;
 
   // HTML / navegación: network-first SIN pasar por el caché del navegador,
   // así siempre baja la última versión publicada.

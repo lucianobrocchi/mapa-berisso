@@ -318,7 +318,8 @@
   </div>
 
   <button id="btnEmpezar">¡Listo, empezar! ✅</button>
-  <div class="pie">Todo (fotos y notas incluidas) se guarda en este teléfono.<br>Para volver a ver esta ayuda, tocá el botón <b>❔</b>.</div>
+  <div class="pie">Todo (fotos y notas incluidas) se guarda en este teléfono.<br>Para volver a ver esta ayuda, tocá el botón <b>❔</b>.<br>
+  <span style="opacity:.85">La app cuenta de forma anónima cuánto se usa. Nunca envía direcciones, nombres, expedientes, notas ni fotos.</span></div>
 </div>
 
 <!-- Ficha de detalle del domicilio -->
@@ -643,6 +644,7 @@ window.moverAPosicion = function(i){
   const [item] = stops.splice(i, 1);
   stops.splice(destino - 1, 0, item);
   guardar();
+  registrar('reordenar', {tipo: 'numero'});
   claveRuta = '';                                   // el camino cambió: recalcular por calles
   redibujar();
   toast(`Movido al lugar ${destino} ✓`);
@@ -657,6 +659,7 @@ window.moverParada = function(i, dir){
   const [item] = stops.splice(i, 1);
   stops.splice(j, 0, item);
   guardar();
+  registrar('reordenar', {tipo: 'flecha'});
   claveRuta = '';                                   // el camino cambió: recalcular por calles
   redibujar();
 };
@@ -744,9 +747,10 @@ async function dibujarRutaPorCalles(puntos, intento){
 }
 
 /* ---------- Acciones sobre domicilios ---------- */
-function agregarParada(dir, lat, lng){
+function agregarParada(dir, lat, lng, via){
   stops.push({id:idNuevo(), dir, lat, lng, estado:'pendiente', nota:'', destinatario:'', expediente:'', intentos:[]});
   guardar(); redibujar();
+  registrar('domicilio', {via: via || 'otro'});
   toast('Domicilio agregado ✓');
   map.setView([lat,lng], 16);
   abrirPanel(true);
@@ -851,6 +855,7 @@ window.setEstado = function(k){
   s.intentos = s.intentos || [];
   s.intentos.push({fecha: Date.now(), estado: k});   // registrar la visita con fecha/hora
   guardar();
+  registrar('resultado', {estado: k});
   renderHistorial();
   // refrescar botones
   document.querySelectorAll('#detEstados .estado-btn').forEach((b,idx)=>{
@@ -884,7 +889,7 @@ inputFoto.addEventListener('change', async e=>{
   if(!db){ toast('Las fotos no están disponibles en este navegador'); return; }
   toast('Guardando foto…');
   for(const f of files){
-    try{ const data = await comprimirImagen(f); await addFoto(detalleActual, data); }
+    try{ const data = await comprimirImagen(f); await addFoto(detalleActual, data); registrar('foto'); }
     catch(err){ toast('No se pudo guardar una foto'); }
   }
   cargarFotosEnFicha();
@@ -961,7 +966,7 @@ function mostrarResultados(datos){
       setOrigen({lat, lng, dir: el.dataset.nom});
       map.setView([lat,lng], 16); abrirPanel(true);
     }else{
-      agregarParada(el.dataset.nom, lat, lng);
+      agregarParada(el.dataset.nom, lat, lng, 'buscador');
     }
     cajaRes.style.display='none'; input.value='';
   }));
@@ -999,7 +1004,7 @@ map.on('click', e=>{
   if(!modoTocar) return;
   const nombre = prompt('Nombre o referencia del domicilio:', 'Domicilio marcado');
   if(nombre === null) return;
-  agregarParada(nombre.trim() || 'Domicilio marcado', e.latlng.lat, e.latlng.lng);
+  agregarParada(nombre.trim() || 'Domicilio marcado', e.latlng.lat, e.latlng.lng, 'mapa');
   modoTocar = false; btnTocar.classList.remove('activo'); aviso.style.display='none';
 });
 
@@ -1078,6 +1083,7 @@ document.getElementById('btnOrdenar').addEventListener('click', async ()=>{
   // 2) Respaldo: orden por cercanía en línea recta (siempre funciona, sin internet)
   stops = vecinoMasCercano(origen, pend.slice()).concat(notif);
   guardar(); claveRuta=''; redibujar();
+  registrar('ordenar', {paradas: pend.length, metodo: 'recta'});
   toast(pend.length > 60
     ? `Ordenado por cercanía: ${pend.length} paradas es demasiado para el cálculo fino`
     : 'Ordenado por cercanía — no se pudo consultar las calles (¿hay señal?)');
@@ -1215,6 +1221,7 @@ async function ordenarPorCalles(origen, pend, notif){
     guardar(); claveRuta=''; redibujar();
 
     const min = Math.round(costo(ruta)/60);
+    registrar('ordenar', {paradas: pend.length, metodo: 'calles'});
     toast(`Recorrido optimizado 📐 ${pend.length} paradas · ${min} min de viaje`);
     return true;
   }catch(e){
@@ -1299,6 +1306,7 @@ function abrirCompartir(){
   if(stops.length===0){ toast('Primero agregá domicilios al recorrido'); return; }
   const link = linkRecorrido();
   compartir.dataset.link = link;
+  registrar('compartir');
   const inp = document.getElementById('compLink'); if(inp) inp.value = link;
   renderQR(link);
   compartir.classList.add('ver');
@@ -1385,11 +1393,13 @@ function chequearImportar(){
   almacen.activo = nuevo.id;
   localStorage.setItem(ALMACEN2, JSON.stringify(almacen));
   aplicarRecorrido();
+  registrar('recorrido_importado', {paradas: recibidos.length});
   toast('Recorrido guardado ✓'); abrirPanel(true);
 }
 
 /* ---------- Informe imprimible del día (con fotos) ---------- */
 async function generarInforme(){
+  registrar('informe');
   const w = window.open('', '_blank');
   if(!w){ toast('Permití las ventanas emergentes para ver el informe'); return; }
   w.document.write('<!doctype html><meta charset="utf-8"><title>Informe</title><body style="font-family:sans-serif;padding:24px;color:#444">Generando informe…</body>');
@@ -1487,6 +1497,7 @@ window.navegarA = function(id){
   const s = stops.find(x=>x.id===id); if(!s) return;
   navDestino = s; navRuta=null; navManiobras=[]; navIdx=0; navLlego=false; navHabladas={};
   navActivo = true; document.body.classList.add('navegando');
+  registrar('navegar', {modo: navModo === 'auto' ? 'auto' : 'pie'});
   // ocultar la línea del recorrido para que no se mezcle con la de navegación
   if(rutaCalles){ map.removeLayer(rutaCalles); rutaCalles=null; }
   if(rutaCallesBorde){ map.removeLayer(rutaCallesBorde); rutaCallesBorde=null; }
@@ -1561,6 +1572,7 @@ function navTick(lat,lng){
   const dDest = metros(pos, {lat:navDestino.lat, lng:navDestino.lng});
   if(dDest < 25 && !navLlego){
     navLlego = true;
+    registrar('llegada');
     document.getElementById('navInstr').textContent = '✅ Llegaste a destino';
     document.getElementById('navDist').textContent = navDestino.dir;
     document.getElementById('navSiguiente').style.display = '';
@@ -1658,6 +1670,7 @@ document.getElementById('recNuevo').addEventListener('click', ()=>{
   almacen.lista.push(r); almacen.activo = r.id;
   localStorage.setItem(ALMACEN2, JSON.stringify(almacen));
   aplicarRecorrido(); cerrarHojaRec(); abrirPanel(true);
+  registrar('recorrido_nuevo');
   toast('📁 Recorrido nuevo creado');
 });
 document.getElementById('recRenombrar').addEventListener('click', ()=>{
@@ -1680,10 +1693,12 @@ document.getElementById('barraSalida').addEventListener('click', abrirHojaSalida
 
 document.getElementById('salGps').addEventListener('click', ()=>{
   cerrarHojaSalida(); setOrigen(null);
+  registrar('salida', {tipo: 'gps'});
   if(!miPos) pedirUbicacion();
 });
 document.getElementById('salBuscar').addEventListener('click', ()=>{
   cerrarHojaSalida(); buscandoSalida = true;
+  registrar('salida', {tipo: 'buscar'});
   abrirPanel(false);
   const i = document.getElementById('q');
   i.value=''; i.placeholder='Dirección de SALIDA (ej: su casa)'; i.focus();
@@ -1691,6 +1706,7 @@ document.getElementById('salBuscar').addEventListener('click', ()=>{
 });
 document.getElementById('salMapa').addEventListener('click', ()=>{
   cerrarHojaSalida(); eligiendoSalida = true; modoTocar = false;
+  registrar('salida', {tipo: 'mapa'});
   document.getElementById('btnTocar').classList.remove('activo');
   abrirPanel(false);
   const av = document.getElementById('aviso');
@@ -1700,6 +1716,7 @@ document.getElementById('salPrimera').addEventListener('click', ()=>{
   cerrarHojaSalida();
   const p = stops.filter(esPendiente)[0] || stops[0];
   if(!p){ toast('Todavía no hay domicilios'); return; }
+  registrar('salida', {tipo: 'primera'});
   setOrigen({lat:p.lat, lng:p.lng, dir:p.dir});
 });
 
@@ -1730,9 +1747,135 @@ abrirDB().then(()=>{
   chequearImportar();   // ¿vino un recorrido por link/QR?
 });
 
+/* ---------- Estadísticas de uso ANÓNIMAS (para el desarrollador) ----------
+   Servicio: Umami Cloud (gratis, sin cookies). Panel: https://cloud.umami.is
+   PRIVACIDAD: nunca sale un domicilio, nombre, expediente, nota, foto ni coordenada.
+   Todo pasa por umamiFiltro(), que sólo deja salir una lista cerrada de eventos
+   con números o palabras cortas (sin espacios ni comas: no entra una dirección).
+   Si UMAMI_ID está vacío, no se carga nada ni se mide nada. */
+const UMAMI_ID = '';                       // ← pegar acá el "Website ID" de Umami
+const EVENTOS_PERMITIDOS = {
+  dia_activo:          ['dispositivo'],    // 1 por día y por aparato → cuántos aparatos distintos la usan
+  activa:              [],                 // cada 2 min con la app en pantalla → minutos de uso
+  ordenar:             ['paradas', 'metodo'],
+  navegar:             ['modo'],
+  llegada:             [],
+  domicilio:           ['via'],
+  resultado:           ['estado'],
+  foto:                [],
+  reordenar:           ['tipo'],
+  salida:              ['tipo'],
+  compartir:           [],
+  informe:             [],
+  recorrido_nuevo:     [],
+  recorrido_importado: ['paradas'],
+};
+let _pageviewEnviado = false, _umamiListo = false;
+const _colaEventos = [];
+
+// Para que el desarrollador no se cuente a sí mismo: abrir la app con ?nocontar=1 (y ?nocontar=0 para volver)
+(function(){
+  try{
+    const q = new URLSearchParams(location.search).get('nocontar');
+    if(q === '1'){ localStorage.setItem('umami.disabled', '1'); setTimeout(()=>toast('Este aparato ya no se cuenta en las estadísticas'), 900); }
+    if(q === '0'){ localStorage.removeItem('umami.disabled'); setTimeout(()=>toast('Este aparato vuelve a contarse'), 900); }
+    if(q !== null) history.replaceState(null, '', location.pathname + location.hash);
+  }catch(e){}
+})();
+function estadisticasActivas(){
+  if(!UMAMI_ID) return false;
+  try{ return !localStorage.getItem('umami.disabled'); }catch(e){ return true; }
+}
+
+// Código al azar que identifica al APARATO (no a la persona). Sirve para contar aparatos
+// distintos aunque cambie la IP del celular (con datos móviles cambia seguido).
+function idDispositivo(){
+  try{
+    let id = localStorage.getItem('disp_anonimo');
+    if(!id){
+      id = Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
+      localStorage.setItem('disp_anonimo', id);
+    }
+    return id;
+  }catch(e){ return 'sin-id'; }
+}
+
+// Filtro de privacidad: Umami lo llama ANTES de mandar cualquier cosa.
+// Arma un envío nuevo desde cero con lo mínimo; todo lo demás se descarta.
+window.umamiFiltro = function(tipo, p){
+  try{
+    if(!p) return false;
+    let ref = '';
+    try{ if(p.referrer && /^https?:/i.test(p.referrer)) ref = new URL(p.referrer).origin; }catch(e){}
+    const limpio = {
+      website: p.website, hostname: p.hostname, screen: p.screen, language: p.language,
+      url: '/', title: 'Reparto de Cédulas', referrer: ref, id: p.id
+    };
+    if(tipo === 'identify') return limpio;           // sólo el código anónimo del aparato, sin datos
+    if(tipo !== 'event') return false;               // nada de métricas de rendimiento
+    if(p.name == null){                              // apertura de la app: una sola vez por carga
+      if(_pageviewEnviado) return false;
+      _pageviewEnviado = true;
+      return limpio;
+    }
+    const campos = EVENTOS_PERMITIDOS[p.name];
+    if(!campos) return false;                        // evento que no está en la lista: no sale
+    limpio.name = p.name;
+    const d = {};
+    campos.forEach(k=>{
+      const v = p.data ? p.data[k] : undefined;
+      if(typeof v === 'number' && isFinite(v)) d[k] = Math.round(v);
+      else if(typeof v === 'string' && /^[a-z0-9_-]{1,24}$/i.test(v)) d[k] = v;
+    });
+    if(Object.keys(d).length) limpio.data = d;
+    return limpio;
+  }catch(e){ return false; }
+};
+
+function registrar(nombre, datos){
+  if(!estadisticasActivas()) return;
+  if(_umamiListo && window.umami){ try{ window.umami.track(nombre, datos); }catch(e){} }
+  else if(_colaEventos.length < 30) _colaEventos.push([nombre, datos]);   // antes de que cargue el script
+}
+
+function hoyLocal(){ const d = new Date(); return d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate(); }
+function marcarDiaActivo(){
+  if(!estadisticasActivas() || !navigator.onLine) return;
+  try{
+    const hoy = hoyLocal();
+    if(localStorage.getItem('ult_dia_activo') === hoy) return;
+    localStorage.setItem('ult_dia_activo', hoy);
+    registrar('dia_activo', {dispositivo: idDispositivo()});
+  }catch(e){}
+}
+
+function cargarEstadisticas(){
+  if(!estadisticasActivas()) return;
+  const s = document.createElement('script');
+  s.defer = true;
+  s.src = 'https://cloud.umami.is/script.js';
+  s.setAttribute('data-website-id', UMAMI_ID);
+  s.setAttribute('data-auto-pageview', 'false');     // la apertura la mando yo, ya filtrada
+  s.setAttribute('data-exclude-hash', 'true');       // el #r=... de un recorrido compartido lleva domicilios
+  s.setAttribute('data-exclude-search', 'true');
+  s.setAttribute('data-before-send', 'umamiFiltro');
+  s.setAttribute('data-distinct-id', idDispositivo());
+  s.onload = ()=>{
+    _umamiListo = true;
+    try{ window.umami.track(); }catch(e){}           // 1 apertura de la app
+    marcarDiaActivo();
+    _colaEventos.splice(0).forEach(([n, d])=>{ try{ window.umami.track(n, d); }catch(e){} });
+  };
+  document.head.appendChild(s);
+}
+window.addEventListener('load', ()=> setTimeout(cargarEstadisticas, 1500));
+setInterval(()=>{ if(document.visibilityState === 'visible') registrar('activa'); }, 120000);
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'visible') marcarDiaActivo(); });
+
 /* ---------- Versión de la app (para saber si está actualizada) ---------- */
-const VERSION = '3.3';
-document.getElementById('verApp').textContent = VERSION;
+const VERSION = '3.4';
+document.getElementById('verApp').textContent = VERSION
+  + (UMAMI_ID && !estadisticasActivas() ? ' · este aparato no se cuenta' : '');
 
 /* ---------- Funciona sin señal (Service Worker / PWA) ---------- */
 if('serviceWorker' in navigator){
