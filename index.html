@@ -1026,7 +1026,7 @@ async function estadoPermiso(){
   return 'desconocido';
 }
 async function pedirUbicacion(){
-  if(!window.isSecureContext){ alert('⚠️ La ubicación necesita el link seguro.\n\nAbrí en Chrome:\nhttps://mapa-berisso.vercel.app'); return; }
+  if(!window.isSecureContext){ alert('⚠️ La ubicación necesita el link seguro.\n\nAbrí en Chrome:\nhttps://mapa-berisso.lucianobrocchi.workers.dev'); return; }
   if(!('geolocation' in navigator)){ alert('Este navegador no permite usar la ubicación. Probá abrir el link en Chrome.'); return; }
   if(siguiendo){ centrarEnMi(); return; }
   const estado = await estadoPermiso();
@@ -1366,7 +1366,39 @@ function renderQR(link){
 
 /* ---------- Recibir un recorrido por link ---------- */
 function limpiarHash(){ try{ history.replaceState(null,'',location.pathname+location.search); }catch(e){ location.hash=''; } }
+/* Mudanza desde la dirección vieja: llega TODO lo guardado (#m=), no un solo recorrido.
+   Las fotos no viajan (quedan en el teléfono, atadas a la dirección vieja). */
+function chequearMudanza(){
+  const m = (location.hash||'').match(/[#&]m=([^&]+)/);
+  if(!m) return false;
+  let datos;
+  try{ datos = JSON.parse(b64urlDecode(m[1])); }catch(e){ limpiarHash(); return true; }
+  limpiarHash();
+  const lista = (datos && datos.a && Array.isArray(datos.a.lista)) ? datos.a.lista : [];
+  const traidos = lista.map(r=>({
+    id: r.id || idNuevo(), nombre: r.nombre || 'Recorrido', origen: r.origen || null, stops: normalizarStops(r.stops)
+  })).filter(r=> r.stops.length || lista.length === 1);
+  if(datos && datos.ayuda) localStorage.setItem('vio_ayuda', '1');
+  if(!traidos.length) return true;
+
+  const vacio = almacen.lista.every(r=> !r.stops.length);
+  if(vacio){
+    almacen = {activo: (datos.a.activo && traidos.some(r=>r.id===datos.a.activo)) ? datos.a.activo : traidos[0].id, lista: traidos};
+  }else{
+    const ids = new Set(almacen.lista.map(r=>r.id));
+    traidos.forEach(r=>{ if(!ids.has(r.id)) almacen.lista.push(r); });
+  }
+  localStorage.setItem(ALMACEN2, JSON.stringify(almacen));
+  aplicarRecorrido();
+  const n = traidos.reduce((t,r)=> t + r.stops.length, 0);
+  toast(`✅ Se mudaron tus datos: ${traidos.length} recorrido(s), ${n} domicilio(s)`);
+  registrar('recorrido_importado', {paradas: n});
+  abrirPanel(true);
+  return true;
+}
+
 function chequearImportar(){
+  if(chequearMudanza()) return;
   const m = (location.hash||'').match(/[#&]r=([^&]+)/);
   if(!m) return;
   let datos;
@@ -1873,7 +1905,7 @@ setInterval(()=>{ if(document.visibilityState === 'visible') registrar('activa')
 document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'visible') marcarDiaActivo(); });
 
 /* ---------- Versión de la app (para saber si está actualizada) ---------- */
-const VERSION = '3.4';
+const VERSION = '3.5';
 document.getElementById('verApp').textContent = VERSION
   + (UMAMI_ID && !estadisticasActivas() ? ' · este aparato no se cuenta' : '');
 

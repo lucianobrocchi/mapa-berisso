@@ -1,0 +1,13 @@
+{
+  // Publicación en Cloudflare: correr `npx wrangler deploy` desde esta carpeta.
+  // URL: https://mapa-berisso.lucianobrocchi.workers.dev
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mapa-berisso",
+  "compatibility_date": "2026-10-23",
+  "observability": {
+    "enabled": true
+  },
+  "assets": {
+    "directory": "."
+  }
+}

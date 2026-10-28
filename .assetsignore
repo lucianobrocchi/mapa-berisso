@@ -1,0 +1,16 @@
+# Lo que NO se publica en Cloudflare (sólo van index.html, sw.js, manifest.json e icono.svg)
+.git
+.git/
+.gitignore
+.assetsignore
+.vercel
+.vercel/
+.claude
+.claude/
+.wrangler
+.wrangler/
+node_modules
+node_modules/
+wrangler.jsonc
+*.log
+*.md
