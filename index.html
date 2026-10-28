@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="es-AR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#1565c0">
+<title>Reparto de Cédulas — nueva dirección</title>
+<style>
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+       background:#0d47a1;color:#fff;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;padding:24px;text-align:center}
+  .c{max-width:420px}
+  .p{font-size:44px;margin-bottom:6px}
+  h1{font-size:21px;margin:0 0 10px}
+  p{font-size:15.5px;line-height:1.5;opacity:.95;margin:0 0 18px}
+  a.btn{display:block;background:#fff;color:#0d47a1;text-decoration:none;font-weight:800;
+        font-size:18px;padding:16px;border-radius:30px;box-shadow:0 2px 10px rgba(0,0,0,.25)}
+  small{display:block;margin-top:16px;opacity:.85;font-size:13px;line-height:1.5}
+</style>
+</head>
+<body>
+<div class="c">
+  <div class="p">📍</div>
+  <h1>La app se mudó</h1>
+  <p id="msg">Te estamos llevando a la dirección nueva…</p>
+  <a class="btn" id="ir" href="https://mapa-berisso.lucianobrocchi.workers.dev/">Abrir la app nueva ▶</a>
+  <small>Guardá la dirección nueva en favoritos o agregala de nuevo a la pantalla de inicio.<br>
+  Las fotos ya sacadas quedan en este teléfono en la versión vieja.</small>
+</div>
+<script>
+(function(){
+  var DESTINO = 'https://mapa-berisso.lucianobrocchi.workers.dev/';
+  function b64urlEncode(str){
+    return btoa(unescape(encodeURIComponent(str))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  }
+  var hash = '';
+  var entrante = location.hash || '';
+  try{
+    if(/[#&](r|m)=/.test(entrante)){
+      hash = entrante;                     // viene un recorrido compartido o una mudanza: pasarlo tal cual
+    }else{
+      var almacen = null;
+      var nuevo = localStorage.getItem('recorridos_v2');
+      if(nuevo){ almacen = JSON.parse(nuevo); }
+      else{
+        var viejo = JSON.parse(localStorage.getItem('paradas_berisso_v1') || '[]');
+        if(viejo && viejo.length) almacen = {activo:'mig', lista:[{id:'mig', nombre:'Mi recorrido', origen:null, stops:viejo}]};
+      }
+      var total = 0;
+      if(almacen && almacen.lista) almacen.lista.forEach(function(r){ total += (r.stops||[]).length; });
+      if(total > 0){
+        hash = '#m=' + b64urlEncode(JSON.stringify({v:1, ayuda: !!localStorage.getItem('vio_ayuda'), a: almacen}));
+        document.getElementById('msg').textContent =
+          'Te llevamos a la dirección nueva junto con tus ' + almacen.lista.length + ' recorrido(s) y ' + total + ' domicilio(s).';
+      }
+    }
+  }catch(e){}
+  var url = DESTINO + hash;
+  document.getElementById('ir').href = url;
+
+  // Sacar la versión vieja guardada en el teléfono
+  try{
+    if('serviceWorker' in navigator){
+      navigator.serviceWorker.getRegistrations().then(function(rs){ rs.forEach(function(r){ r.unregister(); }); });
+    }
+    if(window.caches && caches.keys){ caches.keys().then(function(ks){ ks.forEach(function(k){ caches.delete(k); }); }); }
+  }catch(e){}
+
+  setTimeout(function(){ location.replace(url); }, hash ? 2200 : 1200);
+})();
+</script>
+</body>
+</html>
